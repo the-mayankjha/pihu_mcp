@@ -19,6 +19,15 @@ from pihu.agent.orchestrator import PihuAgent
 from pihu.mcp.manager import MCPManager
 from pihu.config.settings import settings
 from pihu.llm.base import Message
+from pihu.intent.engine import IntentResolver, IntentPath
+from pihu.memory.db import db_engine
+
+try:
+    from InquirerPy import inquirer
+    from InquirerPy.base.control import Choice
+    HAS_INQUIRER = True
+except ImportError:
+    HAS_INQUIRER = False
 
 console = Console(highlight=False)
 
@@ -91,8 +100,34 @@ def show_startup_banner(provider: str, model: str, server_count: int, tool_count
     ))
 
 
-def show_tools(mcp_manager: MCPManager):
-    """Display all MCP tools in a Rich table."""
+async def show_tools(mcp_manager: MCPManager):
+    """Display all MCP tools in a Rich table, with interactive InquirerPy fuzzy search if available."""
+    if HAS_INQUIRER and mcp_manager.tools:
+        choices = []
+        for tool in sorted(mcp_manager.tools, key=lambda t: t.name):
+            server = mcp_manager.tool_map.get(tool.name, ("unknown", ""))[0]
+            choices.append(Choice(value=tool, name=f"[{server:<14}] {tool.name:<25} • {tool.description[:60]}"))
+
+        try:
+            selected_tool = await inquirer.fuzzy(
+                message="Search & Inspect MCP Tool Catalog:",
+                choices=choices,
+                match_exact=False,
+            ).execute_async()
+            if selected_tool:
+                console.print(Panel(
+                    f"[bold white]Tool:[/bold white] {selected_tool.name}\n"
+                    f"[bold white]Description:[/bold white] {selected_tool.description}\n"
+                    f"[bold white]Parameters:[/bold white] {json.dumps(selected_tool.parameters, indent=2)}",
+                    title=f"[cyan]MCP Tool Info: {selected_tool.name}[/cyan]",
+                    border_style="cyan",
+                    box=box.ROUNDED,
+                ))
+                console.print()
+                return
+        except Exception:
+            pass
+
     table = Table(
         title="MCP Tool Catalog",
         box=box.ROUNDED,
@@ -143,14 +178,49 @@ def show_mcp_servers(mcp_manager: MCPManager):
 
 
 async def show_model_selector(agent: PihuAgent, current_provider: str, current_model: str):
-    """Interactive model selector showing available local + cloud models."""
+    """Interactive model selector using InquirerPy with fuzzy search."""
     with console.status("[bold cyan]◌ Discovering available models...[/bold cyan]", spinner="dots"):
         available = await agent.router.discover_models()
 
     all_options = []
-    index = 1
 
     # Ollama (local) models
+    if "ollama" in available and available["ollama"]:
+        for m in available["ollama"]:
+            name = m["name"]
+            size = f"{m.get('size_gb', '?')}GB"
+            all_options.append(("ollama", name, f"ollama:{name} ({size}) [local]"))
+
+    # Gemini (cloud) models
+    if "gemini" in available and available["gemini"]:
+        for m in available["gemini"]:
+            name = m["name"]
+            desc = m.get("description", "")
+            all_options.append(("gemini", name, f"gemini:{name} ({desc}) [cloud]"))
+
+    if HAS_INQUIRER and all_options:
+        choices = [
+            Choice(value=(prov, mod), name=label)
+            for prov, mod, label in all_options
+        ]
+        try:
+            default_val = (current_provider, current_model) if any((prov == current_provider and mod == current_model) for prov, mod, _ in all_options) else choices[0].value
+            selected = await inquirer.select(
+                message="Select PIHU Model:",
+                choices=choices,
+                default=default_val,
+                cycle=True,
+            ).execute_async()
+            if selected:
+                new_prov, new_mod = selected
+                console.print(f"  [bold green]✓[/bold green] Switched to {new_prov}:{new_mod}\n")
+                return new_prov, new_mod
+        except Exception:
+            pass
+
+    # Fallback to Rich terminal list if InquirerPy unavailable or interrupted
+    index = 1
+    fallback_options = []
     if "ollama" in available and available["ollama"]:
         console.print(Text("\n  Local Models (Ollama)", style="bold cyan"))
         for m in available["ollama"]:
@@ -159,13 +229,9 @@ async def show_model_selector(agent: PihuAgent, current_provider: str, current_m
             param = m.get("parameter_size", "")
             marker = " ◀ active" if name == current_model and current_provider == "ollama" else ""
             console.print(f"    {index:2d}) {name:<35} [dim]{param} • {size}[/dim]{marker}")
-            all_options.append(("ollama", name))
+            fallback_options.append(("ollama", name))
             index += 1
-    else:
-        console.print(Text("\n  Local Models (Ollama)", style="bold cyan"))
-        console.print("    [dim]Ollama not running or no models installed[/dim]")
 
-    # Gemini (cloud) models
     if "gemini" in available and available["gemini"]:
         console.print(Text("\n  Cloud Models (Gemini)", style="bold magenta"))
         for m in available["gemini"]:
@@ -173,7 +239,7 @@ async def show_model_selector(agent: PihuAgent, current_provider: str, current_m
             desc = m.get("description", "")
             marker = " ◀ active" if name == current_model and current_provider == "gemini" else ""
             console.print(f"    {index:2d}) {name:<35} [dim]{desc}[/dim]{marker}")
-            all_options.append(("gemini", name))
+            fallback_options.append(("gemini", name))
             index += 1
 
     console.print()
@@ -184,8 +250,8 @@ async def show_model_selector(agent: PihuAgent, current_provider: str, current_m
 
     try:
         idx = int(choice) - 1
-        if 0 <= idx < len(all_options):
-            new_provider, new_model = all_options[idx]
+        if 0 <= idx < len(fallback_options):
+            new_provider, new_model = fallback_options[idx]
             console.print(f"  [bold green]✓[/bold green] Switched to {new_provider}:{new_model}\n")
             return new_provider, new_model
     except ValueError:
@@ -250,6 +316,7 @@ async def run_repl(
     current_model = initial_model or (
         settings.gemini_model if current_provider == "gemini" else settings.ollama_model
     )
+    offline_mode = False
 
     mcp_manager = MCPManager()
     agent = PihuAgent(mcp_manager=mcp_manager)
@@ -316,7 +383,7 @@ async def run_repl(
                 break
 
             if command == "/tools":
-                show_tools(mcp_manager)
+                await show_tools(mcp_manager)
                 continue
 
             if command in {"/mcp", "/servers"}:
@@ -349,6 +416,16 @@ async def run_repl(
                 console.print(f"  [bold green]✓[/bold green] Switched to {current_provider}:{current_model}\n")
                 continue
 
+            if command == "/offline":
+                offline_mode = not offline_mode
+                if offline_mode:
+                    current_provider = "ollama"
+                    current_model = settings.ollama_model
+                    console.print("  [bold yellow]⚡ Offline Mode ENABLED — Using local Ollama models only.[/bold yellow]\n")
+                else:
+                    console.print("  [bold green]🌐 Online Mode ENABLED — Cloud models available.[/bold green]\n")
+                continue
+
             if command == "/help":
                 show_help()
                 continue
@@ -357,48 +434,6 @@ async def run_repl(
                 session_history.clear()
                 console.print("\033[H\033[2J", end="")
                 console.print("[green]✓ Cleared conversation context and screen.[/green]\n")
-                continue
-
-            local = local_response(user_input)
-            if local:
-                session_history.append(Message(role="user", content=user_input))
-                session_history.append(Message(role="assistant", content=local))
-                print_pihu(local)
-                continue
-
-            tool_names = [t.name for t in discovered_tools]
-            fast = fast_call_for(user_input, tool_names)
-            if fast:
-                import time as _time
-                tool_name, arguments = fast
-                fast_started = _time.perf_counter()
-
-                with console.status(
-                    "[bold yellow]◌ Running MCP tool...[/bold yellow]",
-                    spinner="dots",
-                ):
-                    try:
-                        result = await mcp_manager.execute_tool(tool_name, arguments)
-                    except Exception as e:
-                        result = f"Error: {e}"
-
-                fast_elapsed = _time.perf_counter() - fast_started
-
-                import json
-                try:
-                    data = json.loads(result)
-                    dt_str = data.get("datetime", result)
-                    tz = data.get("timezone", "")
-                    day = data.get("day_of_week", "")
-                    reply = f"It's {dt_str} ({day}) in {tz}"
-                except (json.JSONDecodeError, TypeError):
-                    reply = str(result)
-
-                session_history.append(Message(role="user", content=user_input))
-                session_history.append(Message(role="assistant", content=reply))
-
-                print_pihu(reply)
-                console.print(f"[dim]fast MCP • {fast_elapsed:.3f}s[/dim]\n")
                 continue
 
             # Append current user prompt to session history

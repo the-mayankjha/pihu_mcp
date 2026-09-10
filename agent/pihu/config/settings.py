@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     # LLM Settings
     default_provider: str = "ollama"  # "ollama" or "gemini"
-    ollama_base_url: str = "http://localhost:11434"
+    ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3:4b"
     gemini_api_key: Optional[str] = None
     gemini_model: str = "gemini-3.6-flash"
@@ -35,7 +35,16 @@ class Settings(BaseSettings):
 
     @property
     def db_path(self) -> Path:
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-        return self.data_dir / self.db_filename
+        p = self.data_dir / self.db_filename
+        try:
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            test_file = self.data_dir / ".write_test"
+            test_file.touch()
+            test_file.unlink()
+            return p
+        except Exception:
+            fallback_dir = self.project_root / ".pihu"
+            fallback_dir.mkdir(parents=True, exist_ok=True)
+            return fallback_dir / self.db_filename
 
 settings = Settings()

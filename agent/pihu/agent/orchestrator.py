@@ -1,5 +1,6 @@
 import uuid
 import time
+import json
 from typing import Optional, List, Dict, Any
 from pihu.agent.pipeline import ExecutionState, TaskContext
 from pihu.events.bus import bus
@@ -9,6 +10,10 @@ from pihu.llm.base import Message, ToolCall
 from pihu.mcp.manager import MCPManager
 from pihu.security.permissions import SecurityManager
 from pihu.context.engine import ContextEngine
+from pihu.intent.engine import IntentResolver, IntentPath
+from pihu.mcp.retriever import ToolRetriever
+from pihu.memory.db import db_engine
+from pihu.formatter import format_human_response
 
 class PihuAgent:
     """Core PIHU Agent Orchestrator managing execution pipeline state machine."""
@@ -55,19 +60,52 @@ class PihuAgent:
         task_id = f"task_{uuid.uuid4().hex[:8]}"
         context = TaskContext(task_id=task_id, prompt=prompt)
 
+        # Initialize database schema
+        await db_engine.initialize()
+
         await self.transition(context, ExecutionState.RECEIVED, f"Task received: '{prompt}'")
         await self.transition(context, ExecutionState.UNDERSTANDING, "Analyzing task intent and requirements...")
-        await self.transition(context, ExecutionState.CONTEXT_LOADING, "Gathering system and environment context...")
 
+        # Fast Path check via IntentResolver
+        path, fast_tool, fast_args = IntentResolver.classify(prompt)
+        if path == IntentPath.FAST_PATH and fast_tool:
+            if fast_tool == "greeting":
+                ans = fast_args.get("text", "Hello!")
+                await self.transition(context, ExecutionState.COMPLETED, "Fast path greeting completed")
+                return ans
+
+            # Try running the fast tool directly if available
+            discovered_tools = await self.mcp_manager.load_and_initialize()
+            if fast_tool in self.mcp_manager.tool_map:
+                await self.transition(context, ExecutionState.EXECUTING, f"Fast Path executing: {fast_tool}")
+                try:
+                    tool_output = await self.mcp_manager.execute_tool(fast_tool, fast_args or {})
+                    await db_engine.record_activity("FAST_TOOL_EXECUTED", fast_tool, fast_args)
+                    formatted_ans = format_human_response(fast_tool, tool_output, fast_args)
+                    await self.transition(context, ExecutionState.COMPLETED, "Fast path execution completed")
+                    return formatted_ans
+                except Exception as err:
+                    pass  # Fall through to full agent pipeline on error
+
+        await self.transition(context, ExecutionState.CONTEXT_LOADING, "Gathering system and environment context...")
         system_context_str = self.context_engine.render_system_context_prompt()
 
         # Initialize MCP Manager tools
         discovered_tools = await self.mcp_manager.load_and_initialize()
+
+        # Filter relevant tools using ToolRetriever
+        relevant_tools = ToolRetriever.retrieve_relevant_tools(
+            query=prompt,
+            all_tools=discovered_tools,
+            tool_map=self.mcp_manager.tool_map,
+            top_k=8
+        )
+
         await self.transition(
             context,
             ExecutionState.TOOL_SELECTION,
-            f"Available MCP tools: {len(discovered_tools)}",
-            details={"tools": [t.name for t in discovered_tools]}
+            f"Available MCP tools: {len(discovered_tools)} (filtered to top {len(relevant_tools)})",
+            details={"tools": [t.name for t in relevant_tools]}
         )
 
         messages: List[Message] = [
@@ -87,6 +125,7 @@ class PihuAgent:
 
         turns = 0
         final_answer = ""
+        seen_tool_signatures = []
 
         while turns < max_turns:
             turns += 1
@@ -95,7 +134,7 @@ class PihuAgent:
             response = await self.router.generate(
                 task_prompt=prompt,
                 messages=messages,
-                tools=discovered_tools if discovered_tools else None,
+                tools=relevant_tools if relevant_tools else None,
                 preferred_provider=preferred_provider,
                 preferred_model=preferred_model
             )
@@ -106,15 +145,14 @@ class PihuAgent:
 
             if response.tool_calls:
                 await self.transition(context, ExecutionState.EXECUTING, f"Model requested {len(response.tool_calls)} tool call(s)")
-                assistant_tool_msg = Message(
-                    role="assistant",
-                    content=response.content,
-                    tool_calls=response.tool_calls,
-                    raw_parts=response.raw_parts
-                )
-                messages.append(assistant_tool_msg)
 
                 for tc in response.tool_calls:
+                    sig = (tc.name, json.dumps(tc.arguments, sort_keys=True))
+                    if seen_tool_signatures.count(sig) >= 2:
+                        await self.transition(context, ExecutionState.OBSERVING, f"Breaking repeated tool loop for {tc.name}")
+                        break
+                    seen_tool_signatures.append(sig)
+
                     await self.transition(context, ExecutionState.PERMISSION_CHECK, f"Checking permission for {tc.name}")
                     perm_check = await self.security.check_permission(tc.name, tc.arguments)
 
@@ -127,10 +165,12 @@ class PihuAgent:
 
                     try:
                         tool_output = await self.mcp_manager.execute_tool(tc.name, tc.arguments)
+                        await db_engine.record_activity("TOOL_EXECUTED", tc.name, tc.arguments)
                     except Exception as err:
                         tool_output = f"Error executing tool {tc.name}: {str(err)}"
 
                     await self.transition(context, ExecutionState.OBSERVING, f"Observed output from {tc.name}")
+                    messages.append(Message(role="assistant", content=response.content, tool_calls=[tc], raw_parts=response.raw_parts))
                     messages.append(Message(role="tool", name=tc.name, tool_call_id=tc.id, content=tool_output))
             else:
                 break
@@ -157,6 +197,7 @@ class PihuAgent:
         task_id = f"task_{uuid.uuid4().hex[:8]}"
         started = time.perf_counter()
 
+        await db_engine.initialize()
         system_context_str = self.context_engine.render_system_context_prompt()
 
         # Initialize MCP tools if not already done
@@ -173,6 +214,42 @@ class PihuAgent:
         else:
             discovered_tools = self.mcp_manager.tools
 
+        # Fast Path check via IntentResolver inside run_task_interactive
+        path, fast_tool, fast_args = IntentResolver.classify(prompt)
+        if path == IntentPath.FAST_PATH and fast_tool:
+            if fast_tool == "greeting":
+                reply = fast_args.get("text", "Hello!")
+                console.print()
+                console.print(Text.assemble(("Pihu", "bold bright_green"), (" › ", "dim")), end="")
+                console.print(reply)
+                console.print()
+                return reply
+
+            if fast_tool in self.mcp_manager.tool_map:
+                fast_started = time.perf_counter()
+                with console.status(f"[bold yellow]◌ Running {fast_tool}...[/bold yellow]", spinner="dots"):
+                    try:
+                        tool_output = await self.mcp_manager.execute_tool(fast_tool, fast_args or {})
+                        await db_engine.record_activity("FAST_TOOL_EXECUTED", fast_tool, fast_args)
+                        fast_elapsed = time.perf_counter() - fast_started
+                        reply = format_human_response(fast_tool, tool_output, fast_args)
+
+                        console.print()
+                        console.print(Text.assemble(("Pihu", "bold bright_green"), (" › ", "dim")), end="")
+                        console.print(reply)
+                        console.print(f"[dim]fast MCP • {fast_elapsed:.3f}s[/dim]\n")
+                        return reply
+                    except Exception as err:
+                        console.print(f"  [dim red]Fast path error ({err}), falling back to agent...[/dim red]")
+
+        # Retrieve relevant tools using ToolRetriever
+        relevant_tools = ToolRetriever.retrieve_relevant_tools(
+            query=prompt,
+            all_tools=discovered_tools,
+            tool_map=self.mcp_manager.tool_map,
+            top_k=8
+        )
+
         # Setup messages with conversation history
         sys_msg = Message(
             role="system",
@@ -180,8 +257,8 @@ class PihuAgent:
                 "You are PIHU (Personalized Intelligent Human Utility), an expert AI agent.\n"
                 "Help the user complete their task directly and clearly.\n"
                 "Use available MCP tools when necessary to query information or perform actions.\n"
-                "Memory tools are available: create_entities, add_observations, search_nodes, read_graph.\n"
-                "When the user tells you personal details (e.g. name, preferences), use memory tools to remember them!\n"
+                "Primary tools for files are from pihu-file-mcp (e.g. list_directory, stat_file, read_file, write_file).\n"
+                "Primary tools for system are from pihu-system-mcp (e.g. get_system_info, get_system_status).\n"
                 "Keep your answers concise and natural.\n\n"
                 + system_context_str
             )
@@ -197,6 +274,7 @@ class PihuAgent:
         final_answer = ""
         provider_name = preferred_provider or "auto"
         model_name = preferred_model or "auto"
+        seen_tool_signatures = []
 
         while turns < max_turns:
             turns += 1
@@ -209,7 +287,7 @@ class PihuAgent:
                 response = await self.router.generate(
                     task_prompt=prompt,
                     messages=messages,
-                    tools=discovered_tools if discovered_tools else None,
+                    tools=relevant_tools if relevant_tools else None,
                     preferred_provider=preferred_provider,
                     preferred_model=preferred_model,
                 )
@@ -221,8 +299,16 @@ class PihuAgent:
                 final_answer = response.content
 
             if response.tool_calls:
-                # Show tool call panels
+                should_break_loop = False
                 for tc in response.tool_calls:
+                    # Detect and break repeated tool call loops
+                    sig = (tc.name, json.dumps(tc.arguments, sort_keys=True))
+                    if seen_tool_signatures.count(sig) >= 2:
+                        console.print(f"  [yellow]⚠ Repeated tool call detected for '{tc.name}'. Finalizing response.[/yellow]")
+                        should_break_loop = True
+                        break
+                    seen_tool_signatures.append(sig)
+
                     server = "mcp"
                     if tc.name in self.mcp_manager.tool_map:
                         server = self.mcp_manager.tool_map[tc.name][0]
@@ -253,6 +339,7 @@ class PihuAgent:
                     ):
                         try:
                             tool_output = await self.mcp_manager.execute_tool(tc.name, tc.arguments)
+                            await db_engine.record_activity("TOOL_EXECUTED", tc.name, tc.arguments)
                         except Exception as err:
                             tool_output = f"Error: {str(err)}"
 
@@ -278,6 +365,8 @@ class PihuAgent:
                     if history is not None:
                         history.append(tool_msg)
 
+                if should_break_loop:
+                    break
                 continue
             else:
                 if response.content:
@@ -308,6 +397,8 @@ class PihuAgent:
 def _tool_meta(server: str):
     """Return icon and color for an MCP server."""
     meta = {
+        "pihu-file-mcp": ("◫", "cyan"),
+        "pihu-system-mcp": ("⚙", "green"),
         "filesystem": ("◫", "cyan"),
         "memory": ("◆", "magenta"),
         "fetch": ("↗", "blue"),

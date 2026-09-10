@@ -213,3 +213,5 @@ class MCPManager:
             except Exception:
                 pass
         self.sessions.clear()
+        self.tools.clear()
+        self.tool_map.clear()

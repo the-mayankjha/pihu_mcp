@@ -32,12 +32,25 @@ class ModelRouter:
         task_prompt: str,
         is_privacy_sensitive: bool = False,
         is_complex_reasoning: bool = False,
-        preferred_provider: Optional[str] = None
+        preferred_provider: Optional[str] = None,
+        preferred_model: Optional[str] = None,
     ) -> LLMProvider:
+        # Infer provider from model name if provided
+        if preferred_model:
+            if preferred_model.startswith("gemini"):
+                preferred_provider = "gemini"
+            else:
+                preferred_provider = "ollama"
+
         if preferred_provider and preferred_provider in self.providers:
             provider = self.providers[preferred_provider]
             if await provider.is_available():
                 return provider
+            else:
+                raise RuntimeError(
+                    f"LLM provider '{preferred_provider}' is not available. "
+                    f"If using Ollama, ensure 'ollama serve' is running on {settings.ollama_base_url}."
+                )
 
         # If privacy sensitive, prefer local Ollama
         if is_privacy_sensitive:
@@ -45,8 +58,8 @@ class ModelRouter:
             if await ollama.is_available():
                 return ollama
 
-        # If complex reasoning or Gemini requested, check Gemini
-        if is_complex_reasoning or settings.default_provider == "gemini":
+        # If complex reasoning, check Gemini
+        if is_complex_reasoning:
             gemini = self.providers["gemini"]
             if await gemini.is_available():
                 return gemini
@@ -76,7 +89,8 @@ class ModelRouter:
             task_prompt=task_prompt,
             is_privacy_sensitive=is_privacy_sensitive,
             is_complex_reasoning=is_complex_reasoning,
-            preferred_provider=preferred_provider
+            preferred_provider=preferred_provider,
+            preferred_model=preferred_model,
         )
 
         selected_model = preferred_model or (settings.gemini_model if provider.name == "gemini" else settings.ollama_model)
@@ -94,11 +108,9 @@ class ModelRouter:
         try:
             return await provider.generate(messages=messages, tools=tools, model=preferred_model)
         except Exception as e:
-            # If user explicitly chose a provider, don't silently fallback — raise exception so user sees error
-            if preferred_provider:
+            if preferred_provider or preferred_model:
                 raise e
 
-            # Fallback handling for automatic routing
             fallback_name = "gemini" if provider.name == "ollama" else "ollama"
             fallback_provider = self.providers[fallback_name]
             if await fallback_provider.is_available():

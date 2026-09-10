@@ -1,11 +1,19 @@
 {
   "servers": {
-    "filesystem": {
-      "command": "npx",
+    "pihu-file-mcp": {
+      "command": "uv",
       "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "${PROJECT_ROOT}"
+        "run",
+        "python",
+        "mcp/servers/pihu_file_mcp.py"
+      ]
+    },
+    "pihu-system-mcp": {
+      "command": "uv",
+      "args": [
+        "run",
+        "python",
+        "mcp/servers/pihu_system_mcp.py"
       ]
     },
     "memory": {
@@ -19,20 +27,6 @@
       "command": "uvx",
       "args": [
         "mcp-server-fetch"
-      ]
-    },
-    "time": {
-      "command": "uvx",
-      "args": [
-        "mcp-server-time"
-      ]
-    },
-    "system": {
-      "command": "uv",
-      "args": [
-        "run",
-        "python",
-        "mcp/servers/system.py"
       ]
     }
   }

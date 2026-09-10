@@ -85,7 +85,7 @@ class SecurityManager:
         )
 
     async def request_user_approval(self, tool_name: str, arguments: Dict[str, Any], risk_level: RiskLevel) -> bool:
-        """Emit PERMISSION_REQUIRED event over IPC/bus and await user confirmation."""
+        """Emit PERMISSION_REQUIRED event over IPC/bus and await user confirmation via InquirerPy prompt."""
         await bus.emit(
             AgentEvent(
                 type=EventType.PERMISSION_REQUIRED,
@@ -99,6 +99,11 @@ class SecurityManager:
                 }
             )
         )
-        # In non-interactive mode or auto-approve fallback, default to True for standard scripts
-        # In full Go CLI IPC mode, the Go CLI will answer with PERMISSION_RESPONSE event.
-        return True
+        try:
+            from InquirerPy import inquirer
+            return await inquirer.confirm(
+                message=f"Allow {risk_level.value} action '{tool_name}'?",
+                default=True if risk_level == RiskLevel.WRITE else False,
+            ).execute_async()
+        except Exception:
+            return True

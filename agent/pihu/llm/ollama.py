@@ -84,7 +84,11 @@ class OllamaProvider(LLMProvider):
             "model": target_model,
             "messages": formatted_messages,
             "stream": False,
-            "options": {"temperature": temperature}
+            "options": {
+                "temperature": temperature,
+                "top_p": 0.9,
+                "num_predict": 256,  # Cap output length for fast local response (< 3s)
+            }
         }
 
         if tools:
@@ -108,7 +112,6 @@ class OllamaProvider(LLMProvider):
                 payload_no_tools = dict(payload)
                 del payload_no_tools["tools"]
                 
-                # Append tool descriptions to system prompt or first message
                 if tools and payload_no_tools["messages"]:
                     tool_desc_text = "\n\nAvailable tools:\n" + "\n".join(
                         f"- {t.name}: {t.description}" for t in tools[:15]
@@ -141,7 +144,7 @@ class OllamaProvider(LLMProvider):
                     )
                 )
 
-        # Fallback: Parse <function-call> XML tags if Ollama returned text tool calls
+        # Fallback 1: Parse <function-call> XML tags if Ollama returned text XML tool calls
         if not tool_calls and content and "<function-call>" in content:
             matches = re.findall(r'<function-call>\s*(\{.*?\})\s*</function-call>', content, re.DOTALL)
             for m in matches:
@@ -163,6 +166,71 @@ class OllamaProvider(LLMProvider):
                 content = re.sub(r'<function-call>\s*\{.*?\}\s*</function-call>', '', content, flags=re.DOTALL).strip()
                 if not content:
                     content = None
+
+        # Fallback 2: Parse ```json { "name": ..., "arguments": ... } ``` markdown blocks
+        if not tool_calls and content and "```" in content:
+            json_blocks = re.findall(r'```(?:json)?\s*(\{\s*"name":.*?\})\s*```', content, re.DOTALL)
+            for jb in json_blocks:
+                try:
+                    fn_data = json.loads(jb)
+                    fn_name = fn_data.get("name")
+                    fn_args = fn_data.get("arguments", {})
+                    if fn_name:
+                        tool_calls.append(
+                            ToolCall(
+                                id=f"call_{uuid.uuid4().hex[:8]}",
+                                name=fn_name,
+                                arguments=fn_args
+                            )
+                        )
+                except Exception:
+                    pass
+            if tool_calls:
+                content = re.sub(r'```(?:json)?\s*\{\s*"name":.*?\x7d\s*```', '', content, flags=re.DOTALL).strip()
+                if not content:
+                    content = None
+
+        # Fallback 3: Parse raw un-fenced JSON object { "name": ..., "arguments": ... }
+        if not tool_calls and content and content.strip().startswith("{") and content.strip().endswith("}"):
+            try:
+                fn_data = json.loads(content.strip())
+                fn_name = fn_data.get("name")
+                fn_args = fn_data.get("arguments", {})
+                if fn_name:
+                    tool_calls.append(
+                        ToolCall(
+                            id=f"call_{uuid.uuid4().hex[:8]}",
+                            name=fn_name,
+                            arguments=fn_args
+                        )
+                    )
+                    content = None
+            except Exception:
+                pass
+
+        # Fallback 4: Parse ```tool_code\ntool_name(arg=val)\n``` or ```tool_code\ntool_name\n``` emitted by gemma3
+        if not tool_calls and content and "tool_code" in content:
+            tc_blocks = re.findall(r'```(?:tool_code)?\s*([a-zA-Z0-9_]+)(?:\((.*?)\))?\s*```', content, re.DOTALL)
+            for fn_name, fn_args_str in tc_blocks:
+                fn_args = {}
+                if fn_args_str:
+                    # Parse basic key=value or json arguments
+                    try:
+                        fn_args = json.loads(fn_args_str)
+                    except Exception:
+                        for match in re.finditer(r'([a-zA-Z0-9_]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s,]+))', fn_args_str):
+                            k = match.group(1)
+                            v = match.group(2) or match.group(3) or match.group(4)
+                            fn_args[k] = v
+                tool_calls.append(
+                    ToolCall(
+                        id=f"call_{uuid.uuid4().hex[:8]}",
+                        name=fn_name,
+                        arguments=fn_args
+                    )
+                )
+            if tool_calls:
+                content = None
 
         return LLMResponse(
             content=content,
