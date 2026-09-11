@@ -1,0 +1,1 @@
+"""PIHU Web Search MCP."""

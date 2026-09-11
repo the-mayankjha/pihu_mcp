@@ -16,6 +16,14 @@
         "mcp/servers/pihu_system_mcp.py"
       ]
     },
+    "web-search": {
+      "command": "uv",
+      "args": [
+        "run",
+        "python",
+        "mcp/servers/web.py"
+      ]
+    },
     "memory": {
       "command": "npx",
       "args": [
