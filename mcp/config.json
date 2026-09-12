@@ -21,7 +21,8 @@
       "args": [
         "run",
         "python",
-        "mcp/servers/web.py"
+        "-c",
+        "import sys, os; sys.path.insert(0, os.path.abspath('mcp/servers/web-search-mcp')); from web_search_mcp.server import main; main()"
       ]
     },
     "memory": {

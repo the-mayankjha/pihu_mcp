@@ -1,13 +1,11 @@
-from __future__ import annotations
-
-from mcp.server import MCPServer
+from mcp.server.fastmcp import FastMCP
 
 from web_search_mcp.config import settings
 from web_search_mcp.models import PageContent, ResearchResponse, SearchResponse
 from web_search_mcp.service import WebService
 
-mcp = MCPServer(
-    "PIHU Web Search MCP",
+mcp = FastMCP(
+    "web-search",
     instructions=(
         "Fast, structured web search and retrieval for PIHU. "
         "Use web.search for discovery, web.fetch for a known URL, "
@@ -80,6 +78,4 @@ async def _shutdown() -> None:
 
 
 def main() -> None:
-    # MCPServer owns the protocol lifecycle. Shutdown integration can be
-    # wired into a lifespan when deploying as a long-lived HTTP service.
-    mcp.run(transport="stdio")
+    mcp.run()

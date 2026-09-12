@@ -188,6 +188,7 @@ class PihuAgent:
         max_turns: int = 10,
         preferred_provider: Optional[str] = None,
         preferred_model: Optional[str] = None,
+        target_server: Optional[str] = None,
     ) -> str:
         """Run a task with live Rich console output showing each step."""
         from rich.panel import Panel
@@ -202,21 +203,13 @@ class PihuAgent:
 
         # Initialize MCP tools if not already done
         if not self.mcp_manager.tools:
-            with console.status("[bold cyan]◌ Discovering MCP tools...[/bold cyan]", spinner="dots"):
-                discovered_tools = await self.mcp_manager.load_and_initialize()
-            for server_name, session in self.mcp_manager.sessions.items():
-                tool_count = sum(1 for _, (srv, _) in self.mcp_manager.tool_map.items() if srv == server_name and "__" not in _)
-                console.print(
-                    f"  [bold green]✓[/bold green] {server_name:<14} "
-                    f"[dim]{tool_count} tools[/dim]"
-                )
-            console.print()
+            discovered_tools = await self.mcp_manager.load_and_initialize()
         else:
             discovered_tools = self.mcp_manager.tools
 
         # Fast Path check via IntentResolver inside run_task_interactive
         path, fast_tool, fast_args = IntentResolver.classify(prompt)
-        if path == IntentPath.FAST_PATH and fast_tool:
+        if path == IntentPath.FAST_PATH and fast_tool and not target_server:
             if fast_tool == "greeting":
                 reply = fast_args.get("text", "Hello!")
                 console.print()
@@ -242,13 +235,23 @@ class PihuAgent:
                     except Exception as err:
                         console.print(f"  [dim red]Fast path error ({err}), falling back to agent...[/dim red]")
 
-        # Retrieve relevant tools using ToolRetriever
-        relevant_tools = ToolRetriever.retrieve_relevant_tools(
-            query=prompt,
-            all_tools=discovered_tools,
-            tool_map=self.mcp_manager.tool_map,
-            top_k=8
-        )
+        # Retrieve relevant tools using ToolRetriever or filter by target_server
+        if target_server:
+            relevant_tools = [
+                t for t in discovered_tools
+                if self.mcp_manager.tool_map.get(t.name, (None, None))[0] == target_server
+            ]
+            if not relevant_tools:
+                relevant_tools = discovered_tools
+        else:
+            relevant_tools = ToolRetriever.retrieve_relevant_tools(
+                query=prompt,
+                all_tools=discovered_tools,
+                tool_map=self.mcp_manager.tool_map,
+                top_k=8
+            )
+
+        target_instr = f"\nTARGET MCP SERVER: Focus on tools from the '{target_server}' server." if target_server else ""
 
         # Setup messages with conversation history
         sys_msg = Message(
@@ -259,7 +262,7 @@ class PihuAgent:
                 "Use available MCP tools when necessary to query information or perform actions.\n"
                 "Primary tools for files are from pihu-file-mcp (e.g. list_directory, stat_file, read_file, write_file).\n"
                 "Primary tools for system are from pihu-system-mcp (e.g. get_system_info, get_system_status).\n"
-                "Keep your answers concise and natural.\n\n"
+                "Keep your answers concise and natural." + target_instr + "\n\n"
                 + system_context_str
             )
         )
@@ -300,8 +303,9 @@ class PihuAgent:
 
             if response.tool_calls:
                 should_break_loop = False
+                tool_cards = []
+
                 for tc in response.tool_calls:
-                    # Detect and break repeated tool call loops
                     sig = (tc.name, json.dumps(tc.arguments, sort_keys=True))
                     if seen_tool_signatures.count(sig) >= 2:
                         console.print(f"  [yellow]⚠ Repeated tool call detected for '{tc.name}'. Finalizing response.[/yellow]")
@@ -313,42 +317,36 @@ class PihuAgent:
                     if tc.name in self.mcp_manager.tool_map:
                         server = self.mcp_manager.tool_map[tc.name][0]
 
-                    icon, color = _tool_meta(server)
-                    console.print(
-                        Panel(
-                            Text.assemble(
-                                (f"{icon} ", f"bold {color}"),
-                                (server, "bold white"),
-                                (" › ", "dim"),
-                                (tc.name, "white"),
-                            ),
-                            title="[bold]MCP tool[/bold]",
-                            border_style=color,
-                            box=box.ROUNDED,
-                        )
-                    )
-
                     perm_check = await self.security.check_permission(tc.name, tc.arguments)
                     if perm_check.requires_user_approval:
                         console.print(f"  [yellow]⚠ {tc.name} requires approval (auto-approved)[/yellow]")
 
                     tool_started = time.perf_counter()
                     with console.status(
-                        f"[bold {color}]◌ Running {tc.name}[/bold {color}]",
+                        f"[bold #a6e3a1]⠋ Running {tc.name}...[/bold #a6e3a1]",
                         spinner="dots",
                     ):
                         try:
                             tool_output = await self.mcp_manager.execute_tool(tc.name, tc.arguments)
                             await db_engine.record_activity("TOOL_EXECUTED", tc.name, tc.arguments)
+                            is_success = not tool_output.startswith("Error")
                         except Exception as err:
                             tool_output = f"Error: {str(err)}"
+                            is_success = False
 
                     tool_elapsed = time.perf_counter() - tool_started
 
-                    if tool_output.startswith("Error"):
-                        console.print(f"  [bold red]✗[/bold red] {tc.name} [dim]failed in {tool_elapsed:.3f}s[/dim]")
-                    else:
-                        console.print(f"  [bold green]✓[/bold green] {tc.name} [dim]completed in {tool_elapsed:.3f}s[/dim]")
+                    from pihu.ui.phase_renderer import ToolExecutionCard, format_tool_summary
+                    summary = format_tool_summary(tc.name, tool_output)
+
+                    card = ToolExecutionCard(
+                        server=server,
+                        tool_name=tc.name,
+                        elapsed_sec=tool_elapsed,
+                        output_summary=summary,
+                        success=is_success,
+                    )
+                    tool_cards.append(card)
 
                     assistant_msg = Message(
                         role="assistant",
@@ -364,6 +362,10 @@ class PihuAgent:
                     messages.append(tool_msg)
                     if history is not None:
                         history.append(tool_msg)
+
+                # Render grouped tools step box if adapter supports it
+                if hasattr(console, "render_tool_group") and tool_cards:
+                    console.render_tool_group(tool_cards)
 
                 if should_break_loop:
                     break

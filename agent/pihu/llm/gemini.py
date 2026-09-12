@@ -135,6 +135,11 @@ class GeminiProvider(LLMProvider):
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(url, json=payload)
+            if resp.status_code == 404:
+                raise ValueError(
+                    f"Model '{target_model}' was not found (HTTP 404). "
+                    "It may be deprecated or unsupported. Please select a valid model using `/model`."
+                )
             resp.raise_for_status()
             data = resp.json()
 

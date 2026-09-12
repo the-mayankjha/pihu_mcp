@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>SAVAGE WARRIOR — Mobile App</title>
+  <!-- Google Fonts for Tactical / Brutalist Warrior Style -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=JetBrains+Mono:ital,wght@0,400;0,700;1,400&family=Outfit:wght@400;600;700;900&display=swap" rel="stylesheet">
+  <!-- Feather Icons -->
+  <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
+  <!-- Marked for rich Markdown rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Dynamic Background Container -->
+  <div id="bg-container" class="bg-container">
+    <div id="bg-image-layer" class="bg-layer"></div>
+    <div class="bg-grid-overlay"></div>
+    <div class="bg-vignette"></div>
+  </div>
+
+  <!-- Hidden HTML5 Audio Element for custom MP3 -->
+  <audio id="bg-audio" loop preload="auto">
+    <source src="soundtrack.mp3" type="audio/mpeg">
+    <source src="background.mp3" type="audio/mpeg">
+  </audio>
+
+  <!-- Main Mobile App Shell -->
+  <div class="app-shell">
+    
+    <!-- Top Header Bar -->
+    <header class="top-bar">
+      <!-- TOP LEFT CORNER AUDIO BUTTON -->
+      <button id="audio-toggle-btn" class="icon-btn audio-btn" title="Toggle Soundtrack (ON/OFF)" aria-label="Toggle Audio">
+        <div class="audio-waves" id="audio-waves">
+          <span class="bar bar-1"></span>
+          <span class="bar bar-2"></span>
+          <span class="bar bar-3"></span>
+        </div>
+        <i data-feather="volume-x" id="audio-icon"></i>
+        <span class="btn-label" id="audio-status-label">SOUND: OFF</span>
+      </button>
+
+      <!-- Center App Brand -->
+      <div class="brand-badge">
+        <span class="brand-glitch">SAVAGE</span>
+        <span class="brand-sub">WARRIOR // PROTOCOL</span>
+      </div>
+
+      <!-- Top Right Media / Settings Menu -->
+      <button id="media-modal-btn" class="icon-btn settings-btn" title="Media & Settings" aria-label="Settings">
+        <i data-feather="sliders"></i>
+      </button>
+    </header>
+
+    <!-- Content Sections Area -->
+    <main class="content-scrollable">
+
+      <!-- ================= SECTION 1: DAILY ROUTINE (MAIN PAGE — PR FLOW) ================= -->
+      <section id="section-routine" class="app-section active">
+        <!-- Main PR Flow Header Banner -->
+        <div class="pr-flow-banner">
+          <div class="banner-top">
+            <span class="badge-status live-pulse">WARRIOR COMBAT MODE</span>
+            <span class="banner-date" id="current-date-display">OCTOBER 24, 2026</span>
+          </div>
+          <h1 class="main-title">MAIN PAGE — PR FLOW</h1>
+          <p class="subtitle">Log daily records, dominate your routine, and leave weakness behind.</p>
+          
+          <!-- Daily Streak & Total PRs quick metrics -->
+          <div class="quick-kpis">
+            <div class="kpi-card">
+              <span class="kpi-value" id="streak-counter">19</span>
+              <span class="kpi-label">DAY STREAK</span>
+            </div>
+            <div class="kpi-card highlight">
+              <span class="kpi-value" id="total-prs-counter">42</span>
+              <span class="kpi-label">PRs CRUSHED</span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-value" id="intensity-level">100%</span>
+              <span class="kpi-label">INTENSITY</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Daily Protocol Checklist -->
+        <div class="section-card protocol-card">
+          <div class="card-header">
+            <div class="header-left">
+              <i data-feather="check-circle" class="header-icon"></i>
+              <h3>DAILY PROTOCOL CHECKLIST</h3>
+            </div>
+            <button class="text-btn" id="reset-daily-routine-btn">Reset</button>
+          </div>
+          <div class="protocol-list" id="protocol-checklist">
+            <!-- Checklist items rendered dynamically -->
+          </div>
+        </div>
+
+        <!-- PR Flow Activity Feed -->
+        <div class="section-card">
+          <div class="card-header">
+            <div class="header-left">
+              <i data-feather="zap" class="header-icon fire"></i>
+              <h3>PR FLOW STREAM</h3>
+            </div>
+            <button class="action-btn-sm" id="open-pr-modal-btn">
+              <i data-feather="plus"></i> LOG NEW PR
+            </button>
+          </div>
+          
+          <div class="pr-flow-stream" id="pr-flow-container">
+            <!-- PR items generated dynamically -->
+          </div>
+        </div>
+
+        <!-- Markdown Daily Journal & Log -->
+        <div class="section-card markdown-journal-card">
+          <div class="card-header">
+            <div class="header-left">
+              <i data-feather="file-text" class="header-icon"></i>
+              <h3>MARKDOWN COMBAT LOG</h3>
+            </div>
+            <div class="header-actions">
+              <button class="icon-action-btn" id="toggle-md-mode-btn" title="Toggle Preview / Edit">
+                <i data-feather="edit-3" id="md-toggle-icon"></i>
+              </button>
+              <button class="icon-action-btn" id="export-md-btn" title="Download Markdown (.md)">
+                <i data-feather="download"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="journal-editor-wrap">
+            <textarea id="markdown-input" class="markdown-textarea" placeholder="# Savage Log — Day 48&#10;Write today's battle notes, nutrition, mindset, and PR breakdowns using Markdown..."></textarea>
+            <div id="markdown-preview" class="markdown-preview-box hidden"></div>
+          </div>
+          
+          <div class="journal-footer">
+            <span class="save-indicator" id="save-indicator">Auto-saved to local disk</span>
+            <button class="action-btn-sm primary" id="save-journal-btn">Save Entry</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= SECTION 2: STRENGTH STATS ================= -->
+      <section id="section-stats" class="app-section">
+        <div class="pr-flow-banner stats-banner">
+          <div class="banner-top">
+            <span class="badge-status">TIER: WARLORD IV</span>
+            <span class="banner-date">POUND-FOR-POUND DOMINANCE</span>
+          </div>
+          <h1 class="main-title">STRENGTH STATS</h1>
+          <p class="subtitle">Hard numbers. No excuses. Compound warrior metrics.</p>
+        </div>
+
+        <!-- Warrior Big 4 Compound Stats -->
+        <div class="stats-grid" id="strength-stats-grid">
+          <!-- Dynamically populated stats -->
+        </div>
+
+        <!-- 1RM Calculator Widget -->
+        <div class="section-card calculator-card">
+          <div class="card-header">
+            <div class="header-left">
+              <i data-feather="activity" class="header-icon"></i>
+              <h3>1-REP MAX CALCULATOR</h3>
+            </div>
+          </div>
+          <div class="calc-inputs">
+            <div class="input-group">
+              <label>Weight (kg/lbs)</label>
+              <input type="number" id="calc-weight" value="140" min="1" step="0.5">
+            </div>
+            <div class="input-group">
+              <label>Reps Completed</label>
+              <input type="number" id="calc-reps" value="5" min="1" max="20">
+            </div>
+          </div>
+          <div class="calc-result-box">
+            <div class="calc-res-item">
+              <span class="res-num" id="calc-1rm">163.3</span>
+              <span class="res-unit">ESTIMATED 1RM</span>
+            </div>
+            <button class="action-btn-sm primary" id="apply-to-stats-btn">Save to Stats</button>
+          </div>
+        </div>
+
+        <!-- Strength Progression Milestones -->
+        <div class="section-card">
+          <div class="card-header">
+            <div class="header-left">
+              <i data-feather="shield" class="header-icon"></i>
+              <h3>WARRIOR TIERS</h3>
+            </div>
+          </div>
+          <div class="tier-list">
+            <div class="tier-item completed">
+              <div class="tier-badge">LVL 1</div>
+              <div class="tier-info">
+                <h4>RECRUIT</h4>
+                <p>1x Bodyweight Bench, 1.5x Squat, 1.75x Deadlift</p>
+              </div>
+              <span class="tier-check">UNLOCKED</span>
+            </div>
+            <div class="tier-item completed">
+              <div class="tier-badge">LVL 2</div>
+              <div class="tier-info">
+                <h4>BERSERKER</h4>
+                <p>1.25x Bodyweight Bench, 1.75x Squat, 2x Deadlift</p>
+              </div>
+              <span class="tier-check">UNLOCKED</span>
+            </div>
+            <div class="tier-item current">
+              <div class="tier-badge active">LVL 3</div>
+              <div class="tier-info">
+                <h4>WARLORD (CURRENT)</h4>
+                <p>1.5x Bench, 2.2x Squat, 2.5x Deadlift + 50kg Pull-up</p>
+              </div>
+              <span class="tier-check in-prog">IN PROGRESS (84%)</span>
+            </div>
+            <div class="tier-item locked">
+              <div class="tier-badge">LVL 4</div>
+              <div class="tier-info">
+                <h4>GOD OF WAR</h4>
+                <p>2x Bodyweight Bench, 2.75x Squat, 3x Deadlift</p>
+              </div>
+              <span class="tier-check">LOCKED</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= SECTION 3: GEAR MANAGEMENT ================= -->
+      <section id="section-gear" class="app-section">
+        <div class="pr-flow-banner gear-banner">
+          <div class="banner-top">
+            <span class="badge-status">TACTICAL INVENTORY</span>
+            <span class="banner-date">ACTIVE LOADOUT</span>
+          </div>
+          <h1 class="main-title">GEAR MANAGEMENT</h1>
+          <p class="subtitle">Armor, straps, belts & accessories ready for war.</p>
+          
+          <div class="gear-summary-bar">
+            <div class="gear-sum-col">
+              <span class="sum-title">TOTAL ITEMS</span>
+              <span class="sum-val" id="total-gear-count">6</span>
+            </div>
+            <div class="gear-sum-col">
+              <span class="sum-title">CONDITION AVG</span>
+              <span class="sum-val green" id="gear-condition-avg">91%</span>
+            </div>
+            <button class="action-btn-sm primary" id="open-gear-modal-btn">
+              <i data-feather="plus"></i> ADD GEAR
+            </button>
+          </div>
+        </div>
+
+        <!-- Gear Items List -->
+        <div class="gear-grid" id="gear-list-container">
+          <!-- Gear cards generated dynamically -->
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Bottom Mobile Tab Bar -->
+    <nav class="bottom-nav">
+      <button class="nav-item active" data-target="section-routine">
+        <i data-feather="calendar"></i>
+        <span>ROUTINE & PR</span>
+      </button>
+      <button class="nav-item" data-target="section-stats">
+        <i data-feather="bar-chart-2"></i>
+        <span>STRENGTH</span>
+      </button>
+      <button class="nav-item" data-target="section-gear">
+        <i data-feather="shield"></i>
+        <span>GEAR</span>
+      </button>
+    </nav>
+
+  </div>
+
+  <!-- ================= MODALS ================= -->
+
+  <!-- Modal: Log New PR -->
+  <div class="modal-overlay hidden" id="modal-new-pr">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <h3>LOG NEW PERSONAL RECORD</h3>
+        <button class="close-modal-btn" id="close-pr-modal"><i data-feather="x"></i></button>
+      </div>
+      <form id="pr-form">
+        <div class="form-group">
+          <label>Exercise / Movement</label>
+          <input type="text" id="pr-exercise" placeholder="e.g. Conventional Deadlift, Strict Press" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Weight (kg/lbs)</label>
+            <input type="number" step="0.5" id="pr-weight" placeholder="220" required>
+          </div>
+          <div class="form-group">
+            <label>Reps</label>
+            <input type="number" id="pr-reps" placeholder="3" min="1" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>RPE (Rate of Perceived Exertion 1-10)</label>
+          <input type="number" step="0.5" id="pr-rpe" placeholder="9.5" min="5" max="10">
+        </div>
+        <div class="form-group">
+          <label>Warrior Notes / Markdown</label>
+          <textarea id="pr-notes" rows="2" placeholder="Beltless, hooked grip, bar speed explosive..."></textarea>
+        </div>
+        <button type="submit" class="submit-btn">CRUSH RECORD & SAVE</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Add / Edit Gear -->
+  <div class="modal-overlay hidden" id="modal-gear">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <h3 id="gear-modal-title">ADD TACTICAL GEAR</h3>
+        <button class="close-modal-btn" id="close-gear-modal"><i data-feather="x"></i></button>
+      </div>
+      <form id="gear-form">
+        <input type="hidden" id="gear-id">
+        <div class="form-group">
+          <label>Gear Name</label>
+          <input type="text" id="gear-name" placeholder="e.g. SBD 13mm Lever Belt" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Category</label>
+            <select id="gear-category">
+              <option value="Armor & Belts">Armor & Belts</option>
+              <option value="Joint Support">Joint Support</option>
+              <option value="Grip & Straps">Grip & Straps</option>
+              <option value="Footwear">Footwear</option>
+              <option value="Combat Accessory">Combat Accessory</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Durability (%)</label>
+            <input type="number" id="gear-durability" min="0" max="100" value="95" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Notes / Specs (Markdown supported)</label>
+          <textarea id="gear-notes" rows="2" placeholder="IPF Approved, broke in after 3 heavy sessions..."></textarea>
+        </div>
+        <button type="submit" class="submit-btn">REGISTER GEAR</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Media & Audio Configuration (WebP & MP3) -->
+  <div class="modal-overlay hidden" id="modal-media">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <h3>AUDIO & BACKGROUND SETTINGS</h3>
+        <button class="close-modal-btn" id="close-media-modal"><i data-feather="x"></i></button>
+      </div>
+      
+      <!-- Audio Settings -->
+      <div class="settings-block">
+        <div class="settings-title">
+          <i data-feather="music"></i>
+          <h4>BACKGROUND AUDIO (MP3)</h4>
+        </div>
+        <p class="settings-desc">Plays continuous background atmosphere when toggled via the top-left button.</p>
+        
+        <div class="audio-mode-selector">
+          <label class="radio-option">
+            <input type="radio" name="audioSource" value="synth" id="audio-src-synth" checked>
+            <span>⚔️ Built-in Epic Synth War Drums (Zero Latency)</span>
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="audioSource" value="file" id="audio-src-file">
+            <span>🎵 Custom MP3 File / Upload</span>
+          </label>
+        </div>
+
+        <div class="file-uploader-box" id="mp3-file-box">
+          <label class="file-label" for="mp3-file-input">
+            <i data-feather="upload-cloud"></i>
+            <span id="mp3-filename-label">Choose local MP3 file</span>
+          </label>
+          <input type="file" id="mp3-file-input" accept="audio/mp3,audio/*" class="hidden-input">
+        </div>
+      </div>
+
+      <!-- Background Image Settings -->
+      <div class="settings-block">
+        <div class="settings-title">
+          <i data-feather="image"></i>
+          <h4>BACKGROUND WEBP IMAGE</h4>
+        </div>
+        <p class="settings-desc">Dynamic backdrop running behind your Savage Warrior Program.</p>
+        
+        <div class="file-uploader-box">
+          <label class="file-label" for="webp-file-input">
+            <i data-feather="image"></i>
+            <span id="webp-filename-label">Upload custom .webp or image</span>
+          </label>
+          <input type="file" id="webp-file-input" accept="image/webp,image/*" class="hidden-input">
+        </div>
+        
+        <div class="quick-presets">
+          <span>Preset backdrops:</span>
+          <button class="preset-btn active" data-bg="valhalla">Valhalla Dark</button>
+          <button class="preset-btn" data-bg="cyber">Cyber Forge</button>
+          <button class="preset-btn" data-bg="blood">Blood Iron</button>
+        </div>
+      </div>
+
+      <button class="submit-btn" id="save-media-settings-btn">DONE</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -120,15 +120,27 @@ def format_human_response(tool_name: str, raw_output: str, fast_args: Optional[D
         if not items:
             return "The directory is empty."
 
-        dirs = [item["name"] + "/" for item in items if item.get("is_dir")]
-        files = [item["name"] for item in items if not item.get("is_dir")]
+        path_name = (
+            args.get("path")
+            or (data.get("path") if isinstance(data, dict) else None)
+            or "."
+        )
 
-        parts = []
-        if dirs:
-            parts.append(f"📁 **Folders ({len(dirs)}):**\n" + "\n".join(f"  • {d}" for d in dirs))
-        if files:
-            parts.append(f"📄 **Files ({len(files)}):**\n" + "\n".join(f"  • {f}" for f in files))
+        dirs = [item for item in items if item.get("is_dir") or item.get("type") == "directory"]
+        files = [item for item in items if not (item.get("is_dir") or item.get("type") == "directory")]
 
-        return "Here is what's in your directory:\n\n" + "\n\n".join(parts)
+        all_entries = dirs + files
+        total = len(all_entries)
+
+        tree_lines = [f"📁 **{path_name}** ({total} items)\n"]
+        for idx, entry in enumerate(all_entries):
+            connector = "└── " if idx == total - 1 else "├── "
+            is_directory = entry.get("is_dir") or entry.get("type") == "directory"
+            name = entry.get("name") or entry.get("filename") or str(entry)
+            icon = "📁 " if is_directory else "📄 "
+            suffix = "/" if is_directory and not name.endswith("/") else ""
+            tree_lines.append(f"  {connector}{icon}{name}{suffix}")
+
+        return "\n".join(tree_lines)
 
     return str(raw_output)

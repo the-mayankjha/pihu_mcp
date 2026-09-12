@@ -1,0 +1,48 @@
+# OS / System files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Virtual Environments & Package Caches
+.venv/
+venv/
+ENV/
+env/
+pihu/
+.pytest_cache/
+.pihu/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Compiled Binaries & Executables
+pihu-cli
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Temporary / Scratch Test Files & Directories
+new/
+test.java
+test.class
+test.py
+*.class
+
+# Archives & Media Bundles
+*.zip
+*.tar.gz
+
+# Local Environment Variables & Logs
+.env
+.env.local
+*.log

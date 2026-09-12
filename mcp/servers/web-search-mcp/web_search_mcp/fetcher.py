@@ -4,8 +4,15 @@ import time
 from urllib.parse import urljoin
 
 import httpx
-import trafilatura
-from bs4 import BeautifulSoup
+try:
+    import trafilatura
+except ImportError:
+    trafilatura = None
+
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    BeautifulSoup = None
 
 from web_search_mcp.config import Settings
 from web_search_mcp.models import PageContent, PageMetadata
@@ -18,6 +25,7 @@ class Fetcher:
         self.settings = settings
 
     async def fetch(self, url: str, *, max_chars: int | None = None) -> PageContent:
+        import re
         started = time.perf_counter()
         current = await validate_and_resolve(url)
 
@@ -48,20 +56,39 @@ class Fetcher:
                 raise ValueError("Response exceeds the configured size limit.")
 
             html = raw.decode(response.encoding or "utf-8", errors="replace")
-            soup = BeautifulSoup(html, "html.parser")
 
-            title = soup.title.get_text(" ", strip=True) if soup.title else ""
+            title = ""
             description = ""
-            meta_desc = soup.find("meta", attrs={"name": "description"})
-            if meta_desc:
-                description = str(meta_desc.get("content", ""))
+            canonical_url = None
 
-            text = trafilatura.extract(
-                html,
-                include_links=True,
-                include_tables=True,
-                favor_precision=True,
-            ) or soup.get_text(" ", strip=True)
+            if BeautifulSoup is not None:
+                soup = BeautifulSoup(html, "html.parser")
+                title = soup.title.get_text(" ", strip=True) if soup.title else ""
+                meta_desc = soup.find("meta", attrs={"name": "description"})
+                if meta_desc:
+                    description = str(meta_desc.get("content", ""))
+                canon = soup.find("link", rel="canonical")
+                if canon:
+                    canonical_url = canon.get("href")
+            else:
+                m_title = re.search(r'<title[^>]*>(.*?)</title>', html, re.IGNORECASE | re.DOTALL)
+                if m_title:
+                    title = re.sub(r'<[^>]+>', '', m_title.group(1)).strip()
+
+            text = ""
+            if trafilatura is not None:
+                text = trafilatura.extract(
+                    html,
+                    include_links=True,
+                    include_tables=True,
+                    favor_precision=True,
+                ) or ""
+
+            if not text:
+                clean = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', html, flags=re.IGNORECASE | re.DOTALL)
+                clean = re.sub(r'<[^>]+>', ' ', clean)
+                lines = [line.strip() for line in clean.splitlines() if line.strip()]
+                text = "\n".join(lines)
 
             limit = max_chars or self.settings.max_chars
             truncated = len(text) > limit
