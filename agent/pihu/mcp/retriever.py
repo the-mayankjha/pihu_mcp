@@ -32,9 +32,11 @@ class ToolRetriever:
             "memory", "remember", "fact", "recall", "store", "know", "name", "preference",
             "history", "entity", "entities", "observation", "graph"
         },
-        "fetch": {
-            "fetch", "url", "http", "https", "web", "website", "page", "download", "api",
-            "get", "request", "scrape"
+        "web": {
+            "web", "search", "google", "internet", "online", "browse", "url", "http",
+            "https", "news", "latest", "current", "info", "lookup", "find", "fetch",
+            "scrape", "website", "page", "weather", "stock", "price", "query", "who",
+            "what", "when", "where", "how", "article", "paper", "github", "release"
         }
     }
 
@@ -62,8 +64,8 @@ class ToolRetriever:
                 target_categories.add(cat)
 
         if not target_categories:
-            # Default to file and system if no specific category matched
-            target_categories = {"file", "system"}
+            # Default to file, system, and web if no specific category matched
+            target_categories = {"file", "system", "web"}
 
         scored_tools = []
         for tool in all_tools:
@@ -90,7 +92,11 @@ class ToolRetriever:
                     score += 1
 
             # High priority tools boost
-            high_priority = {"list_directory", "read_file", "stat_file", "write_file", "get_system_status", "get_system_snapshot", "get_current_time"}
+            high_priority = {
+                "list_directory", "read_file", "stat_file", "write_file",
+                "get_system_status", "get_system_snapshot", "get_current_time",
+                "web_search", "web_search_and_read", "web_fetch"
+            }
             if tool.name in high_priority:
                 score += 2
 

@@ -10,9 +10,20 @@ class GeminiProvider(LLMProvider):
     """Google Gemini cloud LLM provider implementation."""
 
     def __init__(self, api_key: Optional[str] = None, default_model: Optional[str] = None):
-        self.api_key = api_key or settings.gemini_api_key or os.getenv("GEMINI_API_KEY")
+        self._custom_api_key = api_key
         self.default_model = default_model or settings.gemini_model
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
+
+    @property
+    def api_key(self) -> str:
+        if self._custom_api_key:
+            return self._custom_api_key
+        return (
+            os.getenv("PIHU_GEMINI_API_KEY")
+            or os.getenv("GEMINI_API_KEY")
+            or settings.gemini_api_key
+            or ""
+        )
 
     @property
     def name(self) -> str:

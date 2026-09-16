@@ -16,13 +16,13 @@
         "mcp/servers/pihu_system_mcp.py"
       ]
     },
-    "web-search": {
+    "pihu-web-search-mcp": {
       "command": "uv",
       "args": [
         "run",
         "python",
         "-c",
-        "import sys, os; sys.path.insert(0, os.path.abspath('mcp/servers/web-search-mcp')); from web_search_mcp.server import main; main()"
+        "import sys, os; sys.path.insert(0, os.path.abspath('mcp/servers/pihu-web-search-mcp')); from web_search_mcp.server import main; main()"
       ]
     },
     "memory": {

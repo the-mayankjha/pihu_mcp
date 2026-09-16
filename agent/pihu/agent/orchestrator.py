@@ -1,3 +1,4 @@
+import re
 import uuid
 import time
 import json
@@ -251,7 +252,41 @@ class PihuAgent:
                 top_k=8
             )
 
+        # Check for explicit @filepath or @dirpath references in user prompt
+        at_file_matches = re.findall(r'@([\w\.\/\-]+)', prompt)
+        explicit_file_context = ""
+        if at_file_matches:
+            from pathlib import Path
+            for f_path in at_file_matches:
+                p = Path(f_path).expanduser()
+                if not p.is_absolute():
+                    p = Path.cwd() / p
+                if p.exists():
+                    if p.is_file():
+                        explicit_file_context += f"\nEXPLICIT TARGET FILE: '{f_path}' exists. Use 'read_file' directly on '{f_path}'. DO NOT search or grep."
+                    elif p.is_dir():
+                        explicit_file_context += f"\nEXPLICIT TARGET DIRECTORY: '{f_path}' exists. Use 'explore_directory' or 'search_files' directly on '{f_path}'."
+
         target_instr = f"\nTARGET MCP SERVER: Focus on tools from the '{target_server}' server." if target_server else ""
+
+        # Load recent activity & project history from SQLite DB
+        history_summary_lines = []
+        try:
+            await db_engine.record_activity("USER_TASK", prompt[:100], {"full_prompt": prompt})
+            await db_engine.index_project(Path.cwd().name, str(Path.cwd()))
+            recent_acts = await db_engine.get_recent_activities(limit=5)
+            recent_projs = await db_engine.get_recent_projects(limit=3)
+
+            if recent_projs:
+                p_str = ", ".join([f"{p['name']} ({p['path']})" for p in recent_projs])
+                history_summary_lines.append(f"Recent Projects Worked On: {p_str}")
+            if recent_acts:
+                a_str = ", ".join([f"{a['event_type']}: {a['target']}" for a in recent_acts])
+                history_summary_lines.append(f"Recent User Activities & Tasks: {a_str}")
+        except Exception:
+            pass
+
+        activity_history_str = ("\nRECENT ACTIVITY HISTORY:\n" + "\n".join(history_summary_lines)) if history_summary_lines else ""
 
         # Setup messages with conversation history
         sys_msg = Message(
@@ -260,9 +295,21 @@ class PihuAgent:
                 "You are PIHU (Personalized Intelligent Human Utility), an expert AI agent.\n"
                 "Help the user complete their task directly and clearly.\n"
                 "Use available MCP tools when necessary to query information or perform actions.\n"
-                "Primary tools for files are from pihu-file-mcp (e.g. list_directory, stat_file, read_file, write_file).\n"
+                "Primary tools for files are from pihu-file-mcp (e.g. explore_directory, search_files, read_file, write_file).\n"
                 "Primary tools for system are from pihu-system-mcp (e.g. get_system_info, get_system_status).\n"
-                "Keep your answers concise and natural." + target_instr + "\n\n"
+                "Primary tools for web/internet are from pihu-web-search-mcp (e.g. web_search, web_search_and_read, web_fetch).\n"
+                "WEB SEARCH GUIDELINES:\n"
+                "- Whenever asked about current events, news, documentation, internet queries, or external facts, ALWAYS use 'web_search' or 'web_search_and_read'.\n"
+                "- To fetch content from a URL, use 'web_fetch'.\n"
+                "Keep your answers concise and natural.\n"
+                "FORMATTING RULES:\n"
+                "- Do NOT use emojis anywhere in your responses. Use clean unicode symbols only: ✦ ● ◫ ⚙ › ✓ ◆ ↗\n"
+                "- When showing directory trees or project structures, format them vertically using "
+                "unicode box-drawing connectors: ├── └── │\n"
+                "- Never use emoji icons like folder/file emojis. Use ◫ for directories and › for files.\n"
+                + explicit_file_context + "\n"
+                + target_instr + "\n"
+                + activity_history_str + "\n\n"
                 + system_context_str
             )
         )
@@ -401,6 +448,8 @@ def _tool_meta(server: str):
     meta = {
         "pihu-file-mcp": ("◫", "cyan"),
         "pihu-system-mcp": ("⚙", "green"),
+        "pihu-web-search-mcp": ("↗", "blue"),
+        "web-search": ("↗", "blue"),
         "filesystem": ("◫", "cyan"),
         "memory": ("◆", "magenta"),
         "fetch": ("↗", "blue"),

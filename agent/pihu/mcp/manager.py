@@ -39,8 +39,9 @@ class MCPServerSession:
         from contextlib import AsyncExitStack
         self._exit_stack = AsyncExitStack()
         try:
+            devnull = open(os.devnull, "w")
             read_stream, write_stream = await self._exit_stack.enter_async_context(
-                stdio_client(server_params)
+                stdio_client(server_params, errlog=devnull)
             )
             self.session = await self._exit_stack.enter_async_context(
                 ClientSession(read_stream, write_stream)

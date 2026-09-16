@@ -1,11 +1,11 @@
 from mcp.server.fastmcp import FastMCP
 
 from web_search_mcp.config import settings
-from web_search_mcp.models import PageContent, ResearchResponse, SearchResponse
+from web_search_mcp.models import FileDownloadListResponse, FileDownloadResponse, PageContent, ResearchResponse, SearchResponse
 from web_search_mcp.service import WebService
 
 mcp = FastMCP(
-    "web-search",
+    "pihu-web-search-mcp",
     instructions=(
         "Fast, structured web search and retrieval for PIHU. "
         "Use web.search for discovery, web.fetch for a known URL, "
@@ -61,13 +61,42 @@ async def web_search_and_read(
 
 
 @mcp.tool()
+async def web_download_file(
+    url: str,
+    save_path: str | None = None,
+) -> FileDownloadResponse:
+    """Download a file (PDF, image, ZIP, dataset, code, binary) from any public URL into workspace."""
+    if not url.strip():
+        raise ValueError("url must not be empty")
+    return await service.download_file(url.strip(), save_path=save_path)
+
+
+@mcp.tool()
+async def web_search_and_download(
+    query: str,
+    file_type: str = "pdf",
+    max_files: int = 3,
+    save_dir: str | None = None,
+) -> FileDownloadListResponse:
+    """Search the web for specific files (PDF, ZIP, CSV, etc.) and download matching files into workspace."""
+    if not query.strip():
+        raise ValueError("query must not be empty")
+    return await service.search_and_download(
+        query.strip(),
+        file_type=file_type,
+        max_files=max_files,
+        save_dir=save_dir,
+    )
+
+
+@mcp.tool()
 def web_capabilities() -> dict:
     """Return machine-readable capabilities for PIHU's capability registry."""
     return {
-        "name": "web-search",
+        "name": "pihu-web-search-mcp",
         "online": True,
         "network_required": True,
-        "supports": ["search", "fetch", "search_and_read"],
+        "supports": ["search", "fetch", "search_and_read", "download_file", "search_and_download"],
         "browser_required": False,
         "max_results": settings.max_results,
     }

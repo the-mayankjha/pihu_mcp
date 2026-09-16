@@ -56,3 +56,22 @@ class ResearchResponse(BaseModel):
     query: str
     sources: list[Evidence]
     took_ms: int
+
+
+class FileDownloadResponse(BaseModel):
+    url: str
+    save_path: str
+    filename: str
+    size_bytes: int
+    size_human: str
+    content_type: str
+    sha256_hash: str
+    status: str = "success"
+    message: str = ""
+    took_ms: int = 0
+
+
+class FileDownloadListResponse(BaseModel):
+    query: str
+    downloads: list[FileDownloadResponse]
+    took_ms: int

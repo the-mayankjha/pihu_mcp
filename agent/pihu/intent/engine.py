@@ -37,19 +37,16 @@ class IntentResolver:
         if clean_text in {"bye", "goodbye", "cya"}:
             return IntentPath.FAST_PATH, "greeting", {"text": "Goodbye! 👋 Have a great day!"}
 
-        # System Time & Date queries
-        time_patterns = [
-            r"time", r"date", r"clock", r"today",
-            r"what(?:'s|\s+is)\s+the\s+time",
-            r"what\s+time\s+is\s+it",
-            r"current\s+time",
-            r"time\s+now",
-            r"what(?:'s|\s+is)\s+the\s+date",
-            r"what\s+date\s+is\s+it",
-            r"current\s+date",
-            r"today(?:'s|\s+is)\s+date",
+        # System Time & Date queries (strict patterns to prevent false positives)
+        time_exact = {"time", "date", "clock", "what time is it", "what's the time", "current time", "what date is it", "today's date", "current date"}
+        time_regexes = [
+            r"^what(?:'s|\s+is)\s+the\s+(?:time|date)\b",
+            r"^what\s+(?:time|date)\s+is\s+it\b",
+            r"^current\s+(?:time|date)\b",
+            r"^time\s+now\b",
+            r"^tell\s+me\s+the\s+(?:time|date)\b",
         ]
-        if any(re.search(r'\b' + p + r'\b', clean_text) for p in time_patterns if len(p) > 3) or clean_text in {"time", "date", "clock"}:
+        if clean_text in time_exact or any(re.search(p, clean_text) for p in time_regexes):
             return IntentPath.FAST_PATH, "get_current_time", {"timezone": "Asia/Kolkata"}
 
         # Memory / RAM queries

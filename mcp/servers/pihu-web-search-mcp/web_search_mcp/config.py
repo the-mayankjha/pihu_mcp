@@ -13,8 +13,19 @@ def _int(name: str, default: int) -> int:
 
 @dataclass(frozen=True)
 class Settings:
-    brave_api_key: str = os.getenv("BRAVE_SEARCH_API_KEY", "")
-    search_provider: str = os.getenv("WEB_SEARCH_PROVIDER", "brave")
+    brave_api_key: str = (
+        os.getenv("PIHU_WEB_SEARCH_API_KEY", "")
+        or os.getenv("PIHU_BRAVE_SEARCH_API_KEY", "")
+        or os.getenv("BRAVE_SEARCH_API_KEY", "")
+    )
+    search_provider: str = os.getenv(
+        "WEB_SEARCH_PROVIDER",
+        "brave" if (
+            os.getenv("PIHU_WEB_SEARCH_API_KEY")
+            or os.getenv("PIHU_BRAVE_SEARCH_API_KEY")
+            or os.getenv("BRAVE_SEARCH_API_KEY")
+        ) else "duckduckgo"
+    )
     max_results: int = _int("WEB_SEARCH_MAX_RESULTS", 8)
     fetch_timeout: float = float(os.getenv("WEB_FETCH_TIMEOUT", "12"))
     max_bytes: int = _int("WEB_FETCH_MAX_BYTES", 5_000_000)

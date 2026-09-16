@@ -132,12 +132,12 @@ def format_human_response(tool_name: str, raw_output: str, fast_args: Optional[D
         all_entries = dirs + files
         total = len(all_entries)
 
-        tree_lines = [f"📁 **{path_name}** ({total} items)\n"]
+        tree_lines = [f"◫ **{path_name}** ({total} items)\n"]
         for idx, entry in enumerate(all_entries):
             connector = "└── " if idx == total - 1 else "├── "
             is_directory = entry.get("is_dir") or entry.get("type") == "directory"
             name = entry.get("name") or entry.get("filename") or str(entry)
-            icon = "📁 " if is_directory else "📄 "
+            icon = "◫ " if is_directory else "› "
             suffix = "/" if is_directory and not name.endswith("/") else ""
             tree_lines.append(f"  {connector}{icon}{name}{suffix}")
 

@@ -354,6 +354,128 @@ def trash_file(path: str) -> str:
 
 
 @mcp.tool()
+def search_files(
+    query: str = "",
+    path: str = ".",
+    extension: Optional[str] = None,
+    is_dir_only: bool = False,
+    is_file_only: bool = False,
+    max_results: int = 50,
+) -> List[Dict[str, Any]]:
+    """Fast, recursive file and directory search matching name, query, or file extension."""
+    target = _resolve_path(path)
+    if not target.exists():
+        return []
+
+    q_lower = query.lower().strip() if query else ""
+    ext_clean = ("." + extension.lstrip(".")).lower() if extension else None
+
+    results = []
+    IGNORE_DIRS = {".git", ".venv", "__pycache__", "node_modules", ".trash", ".idea", ".vscode"}
+
+    for root, dirs, files in os.walk(target):
+        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+
+        entries = []
+        if not is_file_only:
+            for d in dirs:
+                entries.append((Path(root) / d, True))
+        if not is_dir_only:
+            for f in files:
+                entries.append((Path(root) / f, False))
+
+        for item_path, is_dir in entries:
+            name = item_path.name
+            name_lower = name.lower()
+
+            if q_lower and q_lower not in name_lower and not fnmatch.fnmatch(name_lower, f"*{q_lower}*"):
+                continue
+
+            if ext_clean and not is_dir:
+                if not name_lower.endswith(ext_clean):
+                    continue
+
+            try:
+                rel = item_path.relative_to(target)
+                stat = item_path.stat()
+                results.append({
+                    "name": name,
+                    "path": str(item_path),
+                    "relative_path": str(rel),
+                    "is_dir": is_dir,
+                    "size_bytes": stat.st_size if not is_dir else 0,
+                    "extension": item_path.suffix if not is_dir else "",
+                    "modified": stat.st_mtime,
+                })
+                if len(results) >= max_results:
+                    return results
+            except Exception:
+                pass
+
+    return results
+
+
+@mcp.tool()
+def explore_directory(path: str = ".", max_depth: int = 2) -> Dict[str, Any]:
+    """Deep structural directory explorer returning directory hierarchy, stats, and contents summary."""
+    target = _resolve_path(path)
+    if not target.exists() or not target.is_dir():
+        raise FileNotFoundError(f"Directory not found: {path}")
+
+    IGNORE_DIRS = {".git", ".venv", "__pycache__", "node_modules", ".trash"}
+
+    def _explore(current_dir: Path, depth: int) -> Dict[str, Any]:
+        if depth > max_depth:
+            return {"name": current_dir.name, "type": "directory", "truncated": True}
+
+        dirs_list = []
+        files_list = []
+
+        try:
+            entries = sorted(list(current_dir.iterdir()), key=lambda x: (not x.is_dir(), x.name.lower()))
+            for entry in entries:
+                if entry.name in IGNORE_DIRS:
+                    continue
+                if entry.is_dir():
+                    dirs_list.append(_explore(entry, depth + 1))
+                else:
+                    try:
+                        stat = entry.stat()
+                        files_list.append({
+                            "name": entry.name,
+                            "size_bytes": stat.st_size,
+                            "extension": entry.suffix,
+                        })
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        return {
+            "name": current_dir.name,
+            "path": str(current_dir),
+            "type": "directory",
+            "directories": dirs_list,
+            "files": files_list,
+        }
+
+    return _explore(target, 1)
+
+
+@mcp.tool()
+def change_directory(path: str) -> str:
+    """Change the active current working directory for PIHU session."""
+    target = _resolve_path(path)
+    if not target.exists():
+        raise FileNotFoundError(f"Directory not found: {path}")
+    if not target.is_dir():
+        raise NotADirectoryError(f"Path is not a directory: {path}")
+
+    os.chdir(target)
+    return f"Successfully changed working directory to {target}"
+
+
+@mcp.tool()
 def find_files(pattern: str = "*", path: str = ".", max_results: int = 50) -> List[Dict[str, Any]]:
     """Search files matching glob pattern (e.g. '*.py', 'invoice*.pdf') starting at path."""
     target = _resolve_path(path)
