@@ -29,13 +29,13 @@ class IntentResolver:
         # Greetings & Courtesy
         greetings = {"hi", "hello", "hey", "hii", "hiii", "yo", "sup", "good morning", "good afternoon", "good evening"}
         if clean_text in greetings:
-            return IntentPath.FAST_PATH, "greeting", {"text": "Hey! 👋 How can I help you today?"}
+            return IntentPath.FAST_PATH, "greeting", {"text": "Hey! How can I help you today?"}
 
         if clean_text in {"thanks", "thank you", "thx", "ty", "cheers"}:
-            return IntentPath.FAST_PATH, "greeting", {"text": "You're welcome! 😊 Let me know if you need anything else."}
+            return IntentPath.FAST_PATH, "greeting", {"text": "You're welcome! Let me know if you need anything else."}
 
         if clean_text in {"bye", "goodbye", "cya"}:
-            return IntentPath.FAST_PATH, "greeting", {"text": "Goodbye! 👋 Have a great day!"}
+            return IntentPath.FAST_PATH, "greeting", {"text": "Goodbye! Have a great day!"}
 
         # System Time & Date queries (strict patterns to prevent false positives)
         time_exact = {"time", "date", "clock", "what time is it", "what's the time", "current time", "what date is it", "today's date", "current date"}

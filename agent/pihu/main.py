@@ -21,6 +21,17 @@ async def async_main(args):
                 preferred_provider=args.provider,
                 preferred_model=args.model,
             )
+        except Exception as e:
+            from pihu.events.types import EventType, AgentEvent
+            await bus.emit(
+                AgentEvent(
+                    type=EventType.ERROR,
+                    component="agent_orchestrator",
+                    status="error",
+                    message=str(e),
+                    details={"error": str(e), "error_type": type(e).__name__},
+                )
+            )
         finally:
             await agent.mcp_manager.close_all()
 

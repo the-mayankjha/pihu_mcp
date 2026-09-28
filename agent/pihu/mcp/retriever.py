@@ -11,32 +11,40 @@ from pihu.llm.base import ToolDefinition
 class ToolRetriever:
     """Capability Index & Search Engine for registered MCP tools."""
 
-    # Domain keyword mapping to tool categories
+    SERVER_DOMAINS: Dict[str, str] = {
+        "pihu-file-mcp": "file",
+        "pihu-system-mcp": "system",
+        "pihu-web-search-mcp": "web",
+        "google-workspace-mcp": "workspace",
+        "pihu-project-mcp": "project",
+    }
+
+    # Strict domain keyword mapping to tool categories
     CATEGORY_KEYWORDS: Dict[str, Set[str]] = {
         "file": {
-            "file", "files", "directory", "folder", "read", "write", "create", "delete",
-            "search", "find", "grep", "lines", "head", "tail", "hash", "copy", "move",
-            "rename", "trash", "stat", "tree", "replace", "append", "path", "txt", "pdf",
-            "md", "json", "py", "java", "js", "cpp"
+            "file", "files", "directory", "folder", "read", "readme", "write", "create",
+            "delete", "search", "find", "grep", "lines", "head", "tail", "hash", "copy",
+            "move", "rename", "trash", "stat", "tree", "replace", "append", "path",
+            "txt", "pdf", "md", "json", "py", "java", "js", "ts", "tsx", "go", "rs", "cpp",
+            "code", "edit", "explore", "inspect", "check", "open", "show", "view"
         },
         "system": {
             "system", "status", "cpu", "ram", "memory", "disk", "hardware", "process",
             "processes", "pid", "uptime", "os", "command", "shell", "run", "exec",
-            "notification", "battery", "hostname", "snapshot"
-        },
-        "time": {
-            "time", "date", "clock", "timezone", "hour", "day", "week", "month", "year",
-            "today", "now"
-        },
-        "memory": {
-            "memory", "remember", "fact", "recall", "store", "know", "name", "preference",
-            "history", "entity", "entities", "observation", "graph"
+            "notification", "battery", "hostname", "snapshot", "terminal", "kill", "ps"
         },
         "web": {
-            "web", "search", "google", "internet", "online", "browse", "url", "http",
-            "https", "news", "latest", "current", "info", "lookup", "find", "fetch",
-            "scrape", "website", "page", "weather", "stock", "price", "query", "who",
-            "what", "when", "where", "how", "article", "paper", "github", "release"
+            "web", "search", "internet", "online", "browse", "url", "http", "https",
+            "news", "latest", "current", "fetch", "scrape", "website", "page", "weather",
+            "stock", "price", "download", "duckduckgo", "brave"
+        },
+        "workspace": {
+            "gmail", "email", "mail", "inbox", "send", "calendar", "event", "meeting",
+            "schedule", "tasks", "tasklist", "drive", "gdrive", "docs", "document"
+        },
+        "project": {
+            "project", "scaffold", "init", "diagnose", "fix", "health", "server", "manage",
+            "deploy", "start", "stop", "npm", "pip", "cargo", "vite"
         }
     }
 
@@ -55,7 +63,8 @@ class ToolRetriever:
         if not all_tools or len(all_tools) <= top_k:
             return all_tools
 
-        query_tokens = set(re.findall(r'\w+', query.lower()))
+        query_lower = query.lower()
+        query_tokens = set(re.findall(r'\w+', query_lower))
 
         # Determine target categories
         target_categories = set()
@@ -64,8 +73,8 @@ class ToolRetriever:
                 target_categories.add(cat)
 
         if not target_categories:
-            # Default to file, system, and web if no specific category matched
-            target_categories = {"file", "system", "web"}
+            # Default to file and system
+            target_categories = {"file", "system"}
 
         scored_tools = []
         for tool in all_tools:
@@ -77,33 +86,50 @@ class ToolRetriever:
             if tool.name in tool_map:
                 server_name = tool_map[tool.name][0].lower()
 
-            # Server category match boost
-            for cat in target_categories:
-                if cat in server_name or cat in t_name_lower:
-                    score += 5
+            server_domain = cls.SERVER_DOMAINS.get(server_name, "")
 
-            # Keyword matches in name and description
+            # If tool belongs to a targeted category, give strong boost
+            if server_domain in target_categories:
+                score += 15
+
+            # If tool belongs to workspace but user didn't mention email/calendar/docs, penalize heavily
+            if server_domain == "workspace" and "workspace" not in target_categories:
+                score -= 50
+
+            # Keyword matches in tool name
             for token in query_tokens:
                 if len(token) < 3:
                     continue
                 if token in t_name_lower:
-                    score += 3
+                    score += 10
                 if token in t_desc_lower:
-                    score += 1
+                    score += 3
 
-            # High priority tools boost
-            high_priority = {
-                "list_directory", "read_file", "stat_file", "write_file",
-                "get_system_status", "get_system_snapshot", "get_current_time",
-                "web_search", "web_search_and_read", "web_fetch"
-            }
-            if tool.name in high_priority:
-                score += 2
+            # Exact matching for common file actions
+            if "readme" in query_tokens or "read" in query_tokens:
+                if tool.name in ["read_file", "read_lines", "read_head", "search_files", "stat_file"]:
+                    score += 20
+
+            if "search" in query_tokens or "find" in query_tokens:
+                if "web" in target_categories and "web_search" in tool.name:
+                    score += 20
+                elif "file" in target_categories and ("search_files" in tool.name or "grep_search" in tool.name):
+                    score += 20
+
+            # Baseline priority for core exploration tools
+            if server_domain == "file" and tool.name in ["list_directory", "read_file", "search_files", "tree"]:
+                score += 5
+            elif server_domain == "system" and tool.name in ["get_system_status", "run_shell"]:
+                score += 3
 
             scored_tools.append((score, tool))
 
         # Sort by score descending
         scored_tools.sort(key=lambda x: x[0], reverse=True)
 
-        selected = [tool for score, tool in scored_tools[:top_k]]
+        selected = [tool for score, tool in scored_tools if score > 0][:top_k]
+        if not selected:
+            # Fallback to top scored tools
+            selected = [tool for score, tool in scored_tools[:top_k]]
+
         return selected

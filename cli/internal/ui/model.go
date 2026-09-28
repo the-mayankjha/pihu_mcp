@@ -234,13 +234,13 @@ func (m Model) View() string {
 		var icon string
 		switch entry.Status {
 		case "success":
-			icon = SuccessIcon.Render("✓")
+			icon = SuccessIcon.String()
 		case "running":
-			icon = RunningIcon.Render("◐")
+			icon = RunningIcon.String()
 		case "error":
-			icon = ErrorIcon.Render("✗")
+			icon = ErrorIcon.String()
 		default:
-			icon = ArrowIcon.Render("→")
+			icon = ArrowIcon.String()
 		}
 
 		sb.WriteString(TimelineItem.Render(fmt.Sprintf("  %s %s", icon, entry.Text)) + "\n")

@@ -46,11 +46,25 @@ class ModelRouter:
             provider = self.providers[preferred_provider]
             if await provider.is_available():
                 return provider
-            else:
-                raise RuntimeError(
-                    f"LLM provider '{preferred_provider}' is not available. "
-                    f"If using Ollama, ensure 'ollama serve' is running on {settings.ollama_base_url}."
+            # If preferred is unavailable, check if the other provider is available before failing
+            fallback_name = "gemini" if preferred_provider == "ollama" else "ollama"
+            fallback_provider = self.providers.get(fallback_name)
+            if fallback_provider and await fallback_provider.is_available():
+                await bus.emit(
+                    AgentEvent(
+                        type=EventType.MODEL_SELECTED,
+                        component="model_router",
+                        status="warning",
+                        message=f"Preferred provider '{preferred_provider}' unavailable. Falling back to '{fallback_name}'.",
+                    )
                 )
+                return fallback_provider
+
+            raise RuntimeError(
+                f"LLM provider '{preferred_provider}' is not available. "
+                f"If using Ollama, ensure 'ollama serve' is running on {settings.ollama_base_url}. "
+                f"If using Gemini, set PIHU_GEMINI_API_KEY or GEMINI_API_KEY."
+            )
 
         # If privacy sensitive, prefer local Ollama
         if is_privacy_sensitive:
@@ -64,16 +78,17 @@ class ModelRouter:
             if await gemini.is_available():
                 return gemini
 
-        # Default fallback chain: Ollama -> Gemini
-        ollama = self.providers["ollama"]
-        if await ollama.is_available():
-            return ollama
-
+        # Default fallback chain: Gemini (if key exists) -> Ollama -> Gemini
         gemini = self.providers["gemini"]
         if await gemini.is_available():
             return gemini
 
-        raise RuntimeError("No available LLM providers configured or online (both Ollama and Gemini unavailable).")
+        ollama = self.providers["ollama"]
+        if await ollama.is_available():
+            return ollama
+
+        raise RuntimeError("No available LLM providers configured or online. Set GEMINI_API_KEY or run Ollama locally.")
+
 
     async def generate(
         self,

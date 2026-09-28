@@ -1,0 +1,178 @@
+Screen {
+    background: #1e1e2e;
+    color: #cdd6f4;
+    margin: 0;
+    padding: 0;
+}
+
+Header {
+    background: #1e1e2e;
+    color: #cba6f7;
+    height: 1;
+}
+
+#pihu-footer {
+    height: 1;
+    width: 100%;
+    background: #181825;
+    color: #cdd6f4;
+    padding: 0 1;
+}
+
+#main-layout,
+#conversation-column,
+#side-panel,
+#status-line,
+#conversation,
+#prompt-symbol,
+#system-panel,
+#mcp-panel,
+#shortcut-panel,
+RichLog {
+    background: #1e1e2e;
+}
+
+Input {
+    background: #181825;
+}
+
+#main-layout {
+    height: 1fr;
+    width: 100%;
+    background: #1e1e2e;
+}
+
+#conversation-column {
+    width: 1fr;
+    height: 100%;
+    background: #1e1e2e;
+}
+
+#side-panel {
+    width: 32;
+    height: 100%;
+    padding: 0 1;
+    background: #1e1e2e;
+}
+
+#status-line {
+    height: 2;
+    padding: 0 2;
+    border-bottom: solid #45475a;
+    background: #1e1e2e;
+}
+
+#conversation {
+    width: 100%;
+    height: 1fr;
+    padding: 1 2;
+    background: #1e1e2e;
+    scrollbar-background: #1e1e2e;
+    scrollbar-color: #585b70;
+}
+
+#suggestion-box {
+    display: none;
+    height: auto;
+    max-height: 18;
+    width: 100%;
+    margin: 0 1 0 1;
+    background: #181825;
+    border-top: round #7f5af0;
+    border-left: round #7f5af0;
+    border-right: round #7f5af0;
+    border-bottom: none;
+    padding: 0 1;
+}
+
+#suggestion-title {
+    text-style: bold;
+    color: #7f5af0;
+    padding: 0 1;
+    height: 1;
+    background: #181825;
+}
+
+#suggestion-options {
+    background: #181825;
+    border: none;
+    height: auto;
+    max-height: 14;
+    scrollbar-background: #181825;
+    scrollbar-color: #585b70;
+}
+
+OptionList {
+    background: #181825;
+    color: #cdd6f4;
+    border: none;
+    scrollbar-background: #181825;
+    scrollbar-color: #585b70;
+}
+
+OptionList:focus {
+    background: #181825;
+    border: none;
+}
+
+OptionList > .option-list--option {
+    background: #181825;
+    color: #cdd6f4;
+    padding: 0 1;
+}
+
+OptionList > .option-list--option-highlighted {
+    background: #313244;
+    color: #cba6f7;
+    text-style: bold;
+}
+
+#activity-status {
+    display: none;
+    height: 1;
+    width: 100%;
+    margin: 0 1;
+    background: #1e1e2e;
+    color: #a6adc8;
+}
+
+#input-row {
+    height: 3;
+    width: 100%;
+    margin: 0 1 1 1;
+    padding: 0 1;
+    background: #181825;
+    border: round #7f5af0;
+}
+
+#prompt-symbol {
+    width: 3;
+    height: 1;
+    color: #cba6f7;
+    content-align: center middle;
+    background: #181825;
+}
+
+#prompt {
+    width: 1fr;
+    height: 1;
+    border: none;
+    color: #cdd6f4;
+    padding: 0;
+    background: #181825;
+}
+
+#prompt:focus {
+    border: none;
+    background: #181825;
+}
+
+#system-panel,
+#mcp-panel,
+#shortcut-panel {
+    width: 100%;
+    height: auto;
+    margin-bottom: 1;
+    color: #bac2de;
+    background: #1e1e2e;
+}

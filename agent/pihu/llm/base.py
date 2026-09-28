@@ -22,7 +22,7 @@ class ToolDefinition(BaseModel):
 
 class LLMResponse(BaseModel):
     content: Optional[str] = None
-    tool_calls: List[ToolCall] = Field(default_factory=list)
+    tool_calls: Optional[List[ToolCall]] = Field(default_factory=list)
     model: str
     provider: str
     usage: Dict[str, Any] = Field(default_factory=dict)

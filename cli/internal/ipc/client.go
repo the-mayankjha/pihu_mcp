@@ -5,47 +5,81 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 
 	"pihu/cli/internal/events"
 )
 
 // Client launches and manages the Python runtime IPC process.
 type Client struct {
-	pythonPath string
 	projectDir string
 }
 
 func NewClient(projectDir string) *Client {
 	return &Client{
-		pythonPath: "uv",
 		projectDir: projectDir,
 	}
 }
 
+func (c *Client) resolvePythonCommand(args ...string) *exec.Cmd {
+	// 1. Check local virtualenv .venv/bin/python3
+	venvPy := filepath.Join(c.projectDir, ".venv", "bin", "python3")
+	if fi, err := os.Stat(venvPy); err == nil && !fi.IsDir() {
+		cmdArgs := append([]string{"-m", "pihu.main"}, args...)
+		cmd := exec.Command(venvPy, cmdArgs...)
+		cmd.Dir = c.projectDir
+		return cmd
+	}
+
+	// 2. Check uv in PATH
+	if uvPath, err := exec.LookPath("uv"); err == nil {
+		cmdArgs := append([]string{"run", "python", "-m", "pihu.main"}, args...)
+		cmd := exec.Command(uvPath, cmdArgs...)
+		cmd.Dir = c.projectDir
+		return cmd
+	}
+
+	// 3. Check pihu executable in PATH
+	if pihuPath, err := exec.LookPath("pihu"); err == nil {
+		cmd := exec.Command(pihuPath, args...)
+		cmd.Dir = c.projectDir
+		return cmd
+	}
+
+	// 4. Fallback to system python3
+	cmdArgs := append([]string{"-m", "pihu.main"}, args...)
+	cmd := exec.Command("python3", cmdArgs...)
+	cmd.Dir = c.projectDir
+	return cmd
+}
+
 // StreamTask launches python -m pihu.main --json "<prompt>" and streams events to the returned channel.
 func (c *Client) StreamTask(prompt, provider, model string) (<-chan events.AgentEvent, <-chan error, error) {
-	eventChan := make(chan events.AgentEvent, 50)
+	eventChan := make(chan events.AgentEvent, 100)
 	errChan := make(chan error, 1)
 
-	args := []string{"run", "python", "-m", "pihu.main", "--json", prompt}
+	var subArgs []string
+	subArgs = append(subArgs, "--json", prompt)
 	if provider != "" {
-		args = append(args, "--provider", provider)
+		subArgs = append(subArgs, "--provider", provider)
 	}
 	if model != "" {
-		args = append(args, "--model", model)
+		subArgs = append(subArgs, "--model", model)
 	}
 
-	cmd := exec.Command(c.pythonPath, args...)
-	cmd.Dir = c.projectDir
+	cmd := c.resolvePythonCommand(subArgs...)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get stdout pipe: %w", err)
 	}
 
+	stderr, _ := cmd.StderrPipe()
+
 	if err := cmd.Start(); err != nil {
-		return nil, nil, fmt.Errorf("failed to start Python runtime process: %w", err)
+		return nil, nil, fmt.Errorf("failed to start Python runtime process (%s): %w", cmd.Path, err)
 	}
 
 	go func() {
@@ -70,6 +104,10 @@ func (c *Client) StreamTask(prompt, provider, model string) (<-chan events.Agent
 			if err := json.Unmarshal(line, &ev); err == nil && ev.Type != "" {
 				eventChan <- ev
 			}
+		}
+
+		if stderr != nil {
+			_, _ = io.ReadAll(stderr)
 		}
 
 		_ = cmd.Wait()

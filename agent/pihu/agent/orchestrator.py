@@ -72,7 +72,7 @@ class PihuAgent:
         if path == IntentPath.FAST_PATH and fast_tool:
             if fast_tool == "greeting":
                 ans = fast_args.get("text", "Hello!")
-                await self.transition(context, ExecutionState.COMPLETED, "Fast path greeting completed")
+                await self.transition(context, ExecutionState.COMPLETED, "Fast path greeting completed", details={"result": ans})
                 return ans
 
             # Try running the fast tool directly if available
@@ -83,10 +83,11 @@ class PihuAgent:
                     tool_output = await self.mcp_manager.execute_tool(fast_tool, fast_args or {})
                     await db_engine.record_activity("FAST_TOOL_EXECUTED", fast_tool, fast_args)
                     formatted_ans = format_human_response(fast_tool, tool_output, fast_args)
-                    await self.transition(context, ExecutionState.COMPLETED, "Fast path execution completed")
+                    await self.transition(context, ExecutionState.COMPLETED, "Fast path execution completed", details={"result": formatted_ans})
                     return formatted_ans
                 except Exception as err:
                     pass  # Fall through to full agent pipeline on error
+
 
         await self.transition(context, ExecutionState.CONTEXT_LOADING, "Gathering system and environment context...")
         system_context_str = self.context_engine.render_system_context_prompt()

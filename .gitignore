@@ -12,8 +12,8 @@ Thumbs.db
 venv/
 ENV/
 env/
-pihu/
 .pytest_cache/
+
 .pihu/
 __pycache__/
 *.pyc

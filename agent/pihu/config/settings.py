@@ -3,9 +3,26 @@ from typing import Optional, List
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+import os
+
+def _find_env_file() -> Optional[str]:
+    candidates = [
+        Path.cwd() / ".env",
+        Path(__file__).resolve().parent.parent.parent.parent / ".env",
+        Path.home() / ".pihu" / ".env",
+    ]
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    return None
+
 class Settings(BaseSettings):
     """PIHU Agent Settings & Configuration"""
-    model_config = SettingsConfigDict(env_prefix="PIHU_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="PIHU_",
+        env_file=_find_env_file(),
+        extra="ignore"
+    )
 
     # General
     app_name: str = "PIHU"
@@ -13,11 +30,11 @@ class Settings(BaseSettings):
     project_root: Path = Field(default_factory=lambda: Path.cwd())
 
     # LLM Settings
-    default_provider: str = "ollama"  # "ollama" or "gemini"
+    default_provider: str = "gemini"  # "gemini" or "ollama"
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3:4b"
     gemini_api_key: Optional[str] = None
-    gemini_model: str = "gemini-3.6-flash"
+    gemini_model: str = "gemini-2.0-flash"
 
     # MCP Settings
     mcp_config_path: Path = Field(default_factory=lambda: Path.cwd() / "mcp" / "config.json")
