@@ -94,9 +94,11 @@ type ReplModel struct {
 	currentBrowseDir string
 
 	// MCP marketplace (/mcp)
-	mcpCatalog     []MCPCatalogItem
-	selectedMCPIdx int
-	mcpFilter      string
+	mcpTab                  MCPTab
+	mcpConnected            []ConnectedMCPServer
+	mcpCatalog              []CommunityMCPItem
+	selectedMCPConnectedIdx int
+	selectedMCPCatalogIdx   int
 
 	isBusy          bool
 	statusMessage   string
@@ -833,45 +835,106 @@ func (m ReplModel) handleDirBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *ReplModel) openMCPMarket() {
 	m.mode = modeMCPMarket
+	m.mcpTab = MCPTabConnected
+	m.mcpConnected = ActiveConnectedServers
 	m.mcpCatalog = CommunityMCPCatalog
-	m.selectedMCPIdx = 0
-	m.mcpFilter = ""
+	m.selectedMCPConnectedIdx = 0
+	m.selectedMCPCatalogIdx = 0
 }
 
 func (m ReplModel) handleMCPMarketKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c":
+		if m.mcpTab == MCPTabGuide {
+			m.mcpTab = MCPTabCatalog
+			return m, nil
+		}
 		m.mode = modeChat
 		m.input.Focus()
 		return m, textinput.Blink
 
+	case "tab", "right", "l":
+		if m.mcpTab == MCPTabConnected {
+			m.mcpTab = MCPTabCatalog
+		} else if m.mcpTab == MCPTabCatalog {
+			m.mcpTab = MCPTabConnected
+		} else if m.mcpTab == MCPTabGuide {
+			m.mcpTab = MCPTabCatalog
+		}
+		return m, nil
+
+	case "left", "h":
+		if m.mcpTab == MCPTabCatalog {
+			m.mcpTab = MCPTabConnected
+		} else if m.mcpTab == MCPTabConnected {
+			m.mcpTab = MCPTabCatalog
+		} else if m.mcpTab == MCPTabGuide {
+			m.mcpTab = MCPTabCatalog
+		}
+		return m, nil
+
+	case "1":
+		m.mcpTab = MCPTabConnected
+		return m, nil
+
+	case "2":
+		m.mcpTab = MCPTabCatalog
+		return m, nil
+
+	case "3":
+		m.mcpTab = MCPTabGuide
+		return m, nil
+
 	case "up", "ctrl+p", "k":
-		if m.selectedMCPIdx > 0 {
-			m.selectedMCPIdx--
-		} else if len(m.mcpCatalog) > 0 {
-			m.selectedMCPIdx = len(m.mcpCatalog) - 1
+		if m.mcpTab == MCPTabConnected {
+			if m.selectedMCPConnectedIdx > 0 {
+				m.selectedMCPConnectedIdx--
+			} else if len(m.mcpConnected) > 0 {
+				m.selectedMCPConnectedIdx = len(m.mcpConnected) - 1
+			}
+		} else if m.mcpTab == MCPTabCatalog {
+			if m.selectedMCPCatalogIdx > 0 {
+				m.selectedMCPCatalogIdx--
+			} else if len(m.mcpCatalog) > 0 {
+				m.selectedMCPCatalogIdx = len(m.mcpCatalog) - 1
+			}
 		}
 		return m, nil
 
 	case "down", "ctrl+n", "j":
-		if m.selectedMCPIdx < len(m.mcpCatalog)-1 {
-			m.selectedMCPIdx++
-		} else {
-			m.selectedMCPIdx = 0
+		if m.mcpTab == MCPTabConnected {
+			if m.selectedMCPConnectedIdx < len(m.mcpConnected)-1 {
+				m.selectedMCPConnectedIdx++
+			} else {
+				m.selectedMCPConnectedIdx = 0
+			}
+		} else if m.mcpTab == MCPTabCatalog {
+			if m.selectedMCPCatalogIdx < len(m.mcpCatalog)-1 {
+				m.selectedMCPCatalogIdx++
+			} else {
+				m.selectedMCPCatalogIdx = 0
+			}
 		}
 		return m, nil
 
-	case "enter":
-		if len(m.mcpCatalog) > 0 && m.selectedMCPIdx >= 0 && m.selectedMCPIdx < len(m.mcpCatalog) {
-			item := m.mcpCatalog[m.selectedMCPIdx]
-			m.mode = modeChat
-			m.input.Focus()
-			m.sess.AddSystem(fmt.Sprintf("✓ MCP Server: %s (%s)\n  Install Command: %s\n  Ready to integrate with PIHU MCP bridge.", item.DisplayName, item.Category, item.InstallCmd))
-			return m, textinput.Blink
+	case "enter", "space", "i":
+		if m.mcpTab == MCPTabConnected {
+			m.mcpTab = MCPTabCatalog
+			return m, nil
+		} else if m.mcpTab == MCPTabCatalog {
+			m.mcpTab = MCPTabGuide
+			return m, nil
+		} else if m.mcpTab == MCPTabGuide {
+			if m.selectedMCPCatalogIdx >= 0 && m.selectedMCPCatalogIdx < len(m.mcpCatalog) {
+				item := m.mcpCatalog[m.selectedMCPCatalogIdx]
+				m.mode = modeChat
+				m.input.Focus()
+				m.sess.AddSystem(fmt.Sprintf("✓ To install %s:\n  1. Run: %s\n  2. Add server configuration to mcp/config.json", item.DisplayName, item.InstallCmd))
+				return m, textinput.Blink
+			}
+			m.mcpTab = MCPTabCatalog
+			return m, nil
 		}
-		m.mode = modeChat
-		m.input.Focus()
-		return m, textinput.Blink
 	}
 	return m, nil
 }
@@ -1253,7 +1316,15 @@ func (m ReplModel) View() string {
 
 	// 6. MCP Marketplace Modal View (/mcp)
 	if m.mode == modeMCPMarket {
-		modal := RenderMCPMarketModal(m.mcpCatalog, m.selectedMCPIdx, m.mcpFilter, m.width, bodyH)
+		modal := RenderMCPRegistryModal(
+			m.mcpTab,
+			m.mcpConnected,
+			m.mcpCatalog,
+			m.selectedMCPConnectedIdx,
+			m.selectedMCPCatalogIdx,
+			m.width,
+			bodyH,
+		)
 		centeredModal := lipgloss.Place(m.width, bodyH, lipgloss.Center, lipgloss.Center, modal)
 		return lipgloss.JoinVertical(lipgloss.Left, header, centeredModal, inputArea)
 	}

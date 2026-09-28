@@ -42,9 +42,9 @@ var SlashCommands = []CommandSuggestion{
 	},
 	{
 		Command: "/mcp",
-		Syntax:  "/mcp [search|install|list]",
-		Desc:    "Connected MCP server status or browse & install new MCPs",
-		Args:    []string{"list", "search", "install", "sqlite", "postgres", "github", "puppeteer", "docker", "fetch"},
+		Syntax:  "/mcp [browse|list]",
+		Desc:    "MCP Registry: connected servers & community installer",
+		Args:    []string{"browse", "list", "install", "sqlite", "postgres", "github", "docker"},
 	},
 	{
 		Command: "/tools",
@@ -142,9 +142,9 @@ func RenderSuggestionBox(suggestions []CommandSuggestion, selectedIdx int, width
 		return ""
 	}
 
-	boxW := min(74, width-4)
-	if boxW < 30 {
-		boxW = 30
+	boxW := min(80, width-4)
+	if boxW < 36 {
+		boxW = 36
 	}
 
 	var rows []string
@@ -166,10 +166,10 @@ func RenderSuggestionBox(suggestions []CommandSuggestion, selectedIdx int, width
 			descStyle = lipgloss.NewStyle().Foreground(colText)
 		}
 
-		cmdStr := cmdStyle.Width(22).Render(s.Syntax)
+		cmdStr := cmdStyle.Width(25).Render(s.Syntax)
 		descStr := descStyle.Render(s.Desc)
-		if len(descStr) > boxW-28 {
-			descStr = descStr[:boxW-31] + "..."
+		if len(descStr) > boxW-31 {
+			descStr = descStr[:boxW-34] + "..."
 		}
 
 		rows = append(rows, pointer+cmdStr+" "+descStr)
@@ -178,7 +178,6 @@ func RenderSuggestionBox(suggestions []CommandSuggestion, selectedIdx int, width
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colMauve).
-		Background(colMantle).
 		Padding(0, 1).
 		Width(boxW).
 		Render(strings.Join(rows, "\n"))

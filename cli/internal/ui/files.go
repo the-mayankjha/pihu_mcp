@@ -151,7 +151,7 @@ func RenderFilePickerModal(
 			sizeStyle := lipgloss.NewStyle().Foreground(colMuted)
 
 			if isSelected {
-				pointer = lipgloss.NewStyle().Foreground(colMauve).Bold(true).Render("› ")
+				pointer = lipgloss.NewStyle().Foreground(colGreen).Bold(true).Render("❯ ")
 				pathStyle = lipgloss.NewStyle().Foreground(colMauve).Bold(true)
 				sizeStyle = lipgloss.NewStyle().Foreground(colSubtext)
 			}
@@ -172,10 +172,9 @@ func RenderFilePickerModal(
 	}
 
 	return lipgloss.NewStyle().
+		Width(modalW).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colMauve).
-		Background(colMantle).
 		Padding(1, 2).
-		Width(modalW).
 		Render(strings.Join(rows, "\n"))
 }

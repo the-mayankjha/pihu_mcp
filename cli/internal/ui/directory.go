@@ -116,7 +116,7 @@ func RenderDirBrowserModal(
 			}
 			style := lipgloss.NewStyle().Foreground(colText)
 			if isSelected {
-				pointer = lipgloss.NewStyle().Foreground(colMauve).Bold(true).Render("› ")
+				pointer = lipgloss.NewStyle().Foreground(colGreen).Bold(true).Render("❯ ")
 				style = lipgloss.NewStyle().Foreground(colMauve).Bold(true)
 			}
 
@@ -130,10 +130,9 @@ func RenderDirBrowserModal(
 	}
 
 	return lipgloss.NewStyle().
+		Width(modalW).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colBlue).
-		Background(colMantle).
 		Padding(1, 2).
-		Width(modalW).
 		Render(strings.Join(rows, "\n"))
 }
