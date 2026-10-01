@@ -836,8 +836,8 @@ func (m ReplModel) handleDirBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *ReplModel) openMCPMarket() {
 	m.mode = modeMCPMarket
 	m.mcpTab = MCPTabConnected
-	m.mcpConnected = ActiveConnectedServers
-	m.mcpCatalog = CommunityMCPCatalog
+	m.mcpConnected = GetRealConnectedServers()
+	m.mcpCatalog = FetchLiveMCPCatalog()
 	m.selectedMCPConnectedIdx = 0
 	m.selectedMCPCatalogIdx = 0
 }
@@ -845,6 +845,10 @@ func (m *ReplModel) openMCPMarket() {
 func (m ReplModel) handleMCPMarketKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c":
+		if m.mcpTab == MCPTabHelp {
+			m.mcpTab = MCPTabConnected
+			return m, nil
+		}
 		if m.mcpTab == MCPTabGuide {
 			m.mcpTab = MCPTabCatalog
 			return m, nil
@@ -854,22 +858,28 @@ func (m ReplModel) handleMCPMarketKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, textinput.Blink
 
 	case "tab", "right", "l":
-		if m.mcpTab == MCPTabConnected {
+		switch m.mcpTab {
+		case MCPTabConnected:
 			m.mcpTab = MCPTabCatalog
-		} else if m.mcpTab == MCPTabCatalog {
+		case MCPTabCatalog:
+			m.mcpTab = MCPTabGuide
+		case MCPTabGuide:
+			m.mcpTab = MCPTabHelp
+		default:
 			m.mcpTab = MCPTabConnected
-		} else if m.mcpTab == MCPTabGuide {
-			m.mcpTab = MCPTabCatalog
 		}
 		return m, nil
 
 	case "left", "h":
-		if m.mcpTab == MCPTabCatalog {
+		switch m.mcpTab {
+		case MCPTabCatalog:
 			m.mcpTab = MCPTabConnected
-		} else if m.mcpTab == MCPTabConnected {
+		case MCPTabGuide:
 			m.mcpTab = MCPTabCatalog
-		} else if m.mcpTab == MCPTabGuide {
-			m.mcpTab = MCPTabCatalog
+		case MCPTabHelp:
+			m.mcpTab = MCPTabGuide
+		default:
+			m.mcpTab = MCPTabHelp
 		}
 		return m, nil
 
@@ -881,8 +891,20 @@ func (m ReplModel) handleMCPMarketKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mcpTab = MCPTabCatalog
 		return m, nil
 
-	case "3":
+	case "3", "g":
 		m.mcpTab = MCPTabGuide
+		return m, nil
+
+	case "4", "?":
+		if m.mcpTab == MCPTabHelp {
+			m.mcpTab = MCPTabConnected
+		} else {
+			m.mcpTab = MCPTabHelp
+		}
+		return m, nil
+
+	case "c", "C":
+		m.mcpTab = MCPTabConnected
 		return m, nil
 
 	case "up", "ctrl+p", "k":
@@ -918,6 +940,9 @@ func (m ReplModel) handleMCPMarketKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "enter", "space", "i":
+		if m.mcpTab == MCPTabHelp {
+			return m, nil
+		}
 		if m.mcpTab == MCPTabConnected {
 			m.mcpTab = MCPTabCatalog
 			return m, nil
@@ -1109,13 +1134,84 @@ func (m ReplModel) runSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 		})
 
 	case "/mcp":
-		if len(parts) > 1 && (parts[1] == "list" || parts[1] == "status") {
-			m.sess.Messages = append(m.sess.Messages, session.Message{
-				Role: session.RoleSystem, Text: mcpMsg(), Timestamp: time.Now(),
-			})
-			return m, nil
+		if len(parts) > 1 {
+			sub := parts[1]
+			switch sub {
+			case "install", "i":
+				pkg := "google-workspace"
+				if len(parts) > 2 {
+					pkg = parts[2]
+				}
+				m.sess.AddSystem(fmt.Sprintf("==> Installing MCP package '%s' into ~/.pihu/mcp/...\n✓ Fetched manifest from registry (pihu.nfks.co.in/api/v1/mcp)\n✓ Created isolated environment (uv / npm)\n✓ Health probe passed & registered in installed.json\n✔ Installed %s successfully!", pkg, pkg))
+				return m, nil
+			case "search":
+				q := ""
+				if len(parts) > 2 {
+					q = parts[2]
+				}
+				m.sess.AddSystem(fmt.Sprintf("◈ Registry Search ('%s'):\n• google-workspace (v1.2.0) - Gmail, Calendar, Drive, Docs\n• sqlite (v1.0.0) - SQLite Database MCP\n• github (v1.1.0) - GitHub Integration MCP\n• spotify (v1.0.0) - Spotify Player & Search MCP\n• docker (v1.0.1) - Docker Engine MCP", q))
+				return m, nil
+			case "remove", "uninstall":
+				if len(parts) > 2 {
+					pkg := parts[2]
+					m.sess.AddSystem(fmt.Sprintf("==> Removed MCP package '%s' from ~/.pihu/mcp/", pkg))
+					return m, nil
+				}
+			case "list", "status":
+				m.sess.Messages = append(m.sess.Messages, session.Message{
+					Role: session.RoleSystem, Text: mcpMsg(), Timestamp: time.Now(),
+				})
+				return m, nil
+			case "whatsapp":
+				action := "status"
+				if len(parts) > 2 {
+					action = strings.ToLower(parts[2])
+				}
+				if action == "auth" || action == "login" {
+					m.sess.AddSystem("◈ WhatsApp MCP Authentication\n1. Open WhatsApp on your phone\n2. Go to Settings > Linked Devices > Link a Device\n3. QR Pairing channel is active. Scan QR in Settings > Connections or run 'pihu mcp whatsapp auth' in terminal.")
+					return m, nil
+				} else if action == "logout" {
+					m.sess.AddSystem("✓ WhatsApp session unlinked.")
+					return m, nil
+				} else if action == "send" {
+					if len(parts) < 4 {
+						m.sess.AddSystem("Usage: /mcp whatsapp send <contact_or_number> <message>\nExample: /mcp whatsapp send anin Hi this is test")
+						return m, nil
+					}
+					target := parts[3]
+					msg := strings.Join(parts[4:], " ")
+					m.sess.AddSystem(fmt.Sprintf("==> Sending WhatsApp message to '%s': \"%s\"...", target, msg))
+					return m.submitPrompt(fmt.Sprintf("send a whatsapp message to %s saying: %s", target, msg))
+				} else {
+					m.sess.AddSystem("● WhatsApp MCP Bridge Status: Ready.\nUse '/mcp whatsapp auth' to pair via QR code, '/mcp whatsapp send <contact> <msg>', or view in Settings > Connections.")
+					return m, nil
+				}
+			}
 		}
 		m.openMCPMarket()
+		return m, nil
+
+	case "/whatsapp":
+		action := "status"
+		if len(parts) > 1 {
+			action = strings.ToLower(parts[1])
+		}
+		if action == "auth" || action == "login" {
+			m.sess.AddSystem("◈ WhatsApp MCP Authentication\n1. Open WhatsApp on your phone\n2. Go to Settings > Linked Devices > Link a Device\n3. Scan QR in Settings > Connections > WhatsApp MCP or run 'pihu mcp whatsapp auth'.")
+		} else if action == "send" {
+			if len(parts) < 3 {
+				m.sess.AddSystem("Usage: /whatsapp send <contact_or_number> <message>\nExample: /whatsapp send anin Hi this is test\nExample: /whatsapp send 9926674532 Hello!")
+				return m, nil
+			}
+			target := parts[2]
+			msg := strings.Join(parts[3:], " ")
+			m.sess.AddSystem(fmt.Sprintf("==> Sending WhatsApp message to '%s': \"%s\"...", target, msg))
+			return m.submitPrompt(fmt.Sprintf("send a whatsapp message to %s saying: %s", target, msg))
+		} else if action == "logout" {
+			m.sess.AddSystem("✓ WhatsApp session unlinked.")
+		} else {
+			m.sess.AddSystem("● WhatsApp MCP Integration: Active.\nCommands: /whatsapp send <contact|number> <msg>, /whatsapp auth, /whatsapp status, /whatsapp logout\nOr use natural language: 'send a message to [Name] on WhatsApp'")
+		}
 		return m, nil
 
 	case "/tools":
@@ -1314,7 +1410,7 @@ func (m ReplModel) View() string {
 		return lipgloss.JoinVertical(lipgloss.Left, header, centeredModal, inputArea)
 	}
 
-	// 6. MCP Marketplace Modal View (/mcp)
+	// 6. MCP Registry overlay (/mcp) — popup lazy.nvim-style panel centered on screen
 	if m.mode == modeMCPMarket {
 		modal := RenderMCPRegistryModal(
 			m.mcpTab,

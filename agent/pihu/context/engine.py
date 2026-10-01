@@ -101,4 +101,48 @@ class ContextEngine:
         if ctx.project.git_branch:
             lines.append(f"Git Branch: {ctx.project.git_branch}")
         lines.append("-------------------------------------")
+
+        # Load People / Contacts Directory
+        contacts_paths = [
+            Path.home() / ".pihu" / "contacts.json",
+            Path.cwd() / "src-tauri" / "contacts.json",
+            Path.cwd() / "contacts.json",
+        ]
+        contacts_data = []
+        for cp in contacts_paths:
+            if cp.exists():
+                try:
+                    import json
+                    with open(cp, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        if isinstance(data, list) and data:
+                            contacts_data = data
+                            break
+                        elif isinstance(data, dict) and "contacts" in data:
+                            contacts_data = data["contacts"]
+                            break
+                except Exception:
+                    pass
+
+        if contacts_data:
+            lines.append("--- PEOPLE & CONTACTS DIRECTORY (USE FOR MESSAGING/EMAIL) ---")
+            for c in contacts_data:
+                name = c.get("name", "Unknown")
+                nick = c.get("nickname") or c.get("relationship", "")
+                email = c.get("email", "N/A")
+                phone = c.get("phone", "N/A")
+                notes = c.get("notes", "")
+                label = f"{name} ({nick})" if nick else name
+                desc = f"• {label} -> Email: {email} | WhatsApp/Phone: {phone}"
+                if notes:
+                    desc += f" | Notes: {notes}"
+                lines.append(desc)
+            lines.append("Instruction for Voice & Chat Messaging Commands:")
+            lines.append("• When user gives a voice or text command like 'send message to [Name] on WhatsApp', 'send whatsapp to [Group/Person]', or 'message [Number]':")
+            lines.append("  1. Resolve recipient automatically from People Directory above or existing WhatsApp chats/groups.")
+            lines.append("  2. Call the 'whatsapp_send_message' MCP tool with the recipient and text.")
+            lines.append("• When user asks to check messages or chats, call 'whatsapp_list_messages' or 'whatsapp_list_chats'.")
+            lines.append("• When user asks to send an email, use Gmail MCP tools with their verified email address.")
+            lines.append("-------------------------------------------------------------")
+
         return "\n".join(lines)

@@ -52,10 +52,26 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&jsonFlag, "json", false, "Emit events as JSON-Lines only (for external IPC/integrations)")
 	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Enable verbose output and tool traces")
 
+	mcpCmd.AddCommand(mcpSearchCmd)
+	mcpCmd.AddCommand(mcpInfoCmd)
+	mcpCmd.AddCommand(mcpInstallCmd)
+	mcpCmd.AddCommand(mcpListCmd)
+	mcpCmd.AddCommand(mcpRemoveCmd)
+	mcpCmd.AddCommand(mcpUpdateCmd)
+	mcpCmd.AddCommand(mcpDoctorCmd)
+	mcpCmd.AddCommand(mcpRefreshCmd)
+
+	mcpWhatsappCmd.AddCommand(mcpWhatsappAuthCmd)
+	mcpWhatsappCmd.AddCommand(mcpWhatsappStatusCmd)
+	mcpWhatsappCmd.AddCommand(mcpWhatsappLogoutCmd)
+	mcpWhatsappCmd.AddCommand(mcpWhatsappSendCmd)
+	mcpCmd.AddCommand(mcpWhatsappCmd)
+
 	rootCmd.AddCommand(chatCmd)
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(toolsCmd)
 	rootCmd.AddCommand(mcpCmd)
+	rootCmd.AddCommand(mcpWhatsappCmd)
 	rootCmd.AddCommand(versionCmd)
 }
 

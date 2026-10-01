@@ -42,14 +42,20 @@ var SlashCommands = []CommandSuggestion{
 	},
 	{
 		Command: "/mcp",
-		Syntax:  "/mcp [browse|list]",
-		Desc:    "MCP Registry: connected servers & community installer",
-		Args:    []string{"browse", "list", "install", "sqlite", "postgres", "github", "docker"},
+		Syntax:  "/mcp [browse|whatsapp|list]",
+		Desc:    "MCP Registry & tools: browse catalog or authenticate servers",
+		Args:    []string{"browse", "list", "install", "whatsapp auth", "whatsapp send", "whatsapp status", "whatsapp logout", "sqlite", "postgres", "github", "docker"},
+	},
+	{
+		Command: "/whatsapp",
+		Syntax:  "/whatsapp [send|auth|status|logout]",
+		Desc:    "WhatsApp MCP: Send messages, QR pairing, health check & session management",
+		Args:    []string{"send", "auth", "status", "logout"},
 	},
 	{
 		Command: "/tools",
 		Syntax:  "/tools",
-		Desc:    "List all 53 active Model Context Protocol tools",
+		Desc:    "List all active Model Context Protocol tools",
 		Args:    nil,
 	},
 	{
@@ -105,16 +111,16 @@ func GetCommandSuggestions(input string) []CommandSuggestion {
 		return matches
 	}
 
-	// 2. If typing arguments: "/theme t" -> suggest "tokyonight"
+	// 2. If typing arguments: "/theme t" -> suggest "tokyonight", "/mcp what" -> suggest "whatsapp auth"
 	for _, c := range SlashCommands {
 		if c.Command == cmdPart {
-			argPrefix := ""
-			if len(parts) > 1 {
-				argPrefix = parts[len(parts)-1]
+			argRest := ""
+			if len(input) > len(cmdPart) {
+				argRest = strings.TrimSpace(input[len(cmdPart):])
 			}
 			var argMatches []string
 			for _, arg := range c.Args {
-				if argPrefix == "" || strings.HasPrefix(strings.ToLower(arg), strings.ToLower(argPrefix)) {
+				if argRest == "" || strings.HasPrefix(strings.ToLower(arg), strings.ToLower(argRest)) {
 					argMatches = append(argMatches, arg)
 				}
 			}

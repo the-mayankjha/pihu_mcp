@@ -30,6 +30,26 @@
       "args": [
         "${SERVERS_DIR}/google.py"
       ]
+    },
+    "pihu-whatsapp-mcp": {
+      "command": "${PYTHON_EXEC}",
+      "args": [
+        "${SERVERS_DIR}/pihu_whatsapp_mcp.py"
+      ]
+    },
+
+
+    "github-mcp": {
+      "command": "${PYTHON_EXEC}",
+      "args": [
+        "${SERVERS_DIR}/pihu_github_mcp.py"
+      ]
+    },
+    "spotify-mcp": {
+      "command": "${PYTHON_EXEC}",
+      "args": [
+        "${SERVERS_DIR}/pihu_spotify_mcp.py"
+      ]
     }
   }
 }

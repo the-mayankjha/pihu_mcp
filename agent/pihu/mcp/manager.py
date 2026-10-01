@@ -270,6 +270,63 @@ class MCPManager:
             )
             raise RuntimeError(error_msg) from e
 
+        self.installer = None
+
+    def get_installer(self):
+        if self.installer is None:
+            from pihu.mcp.installer import MCPInstaller
+            self.installer = MCPInstaller()
+        return self.installer
+
+    async def search(self, query: str = "", category: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Search the MCP registry."""
+        installer = self.get_installer()
+        return await installer.registry_client.search(query=query, category=category)
+
+    async def info(self, mcp_id: str) -> Optional[Dict[str, Any]]:
+        """Get info for an MCP package."""
+        installer = self.get_installer()
+        return await installer.registry_client.get_package_info(mcp_id)
+
+    async def install(self, package_spec: str, callback: Optional[Any] = None) -> Tuple[bool, str, Dict[str, Any]]:
+        """Install an MCP package via the package installer subsystem."""
+        installer = self.get_installer()
+        success, msg, record = await installer.install(package_spec, callback=callback)
+        if success:
+            # Re-read config & refresh live sessions
+            await self.refresh()
+        return success, msg, record
+
+    async def remove(self, mcp_id: str) -> Tuple[bool, str]:
+        """Uninstall an MCP package."""
+        installer = self.get_installer()
+        success, msg = await installer.uninstall(mcp_id)
+        if success:
+            await self.refresh()
+        return success, msg
+
+    async def list_installed(self) -> List[Dict[str, Any]]:
+        """List all locally installed MCP packages."""
+        installer = self.get_installer()
+        manifest_data = installer._read_installed_manifest()
+        return list(manifest_data.get("servers", {}).values())
+
+    async def doctor(self) -> Dict[str, Any]:
+        """Run system diagnostics for MCP runtimes (Python, uv, Node, npm)."""
+        import shutil
+        return {
+            "uv_installed": bool(shutil.which("uv")),
+            "python_version": sys.version,
+            "node_installed": bool(shutil.which("node")),
+            "npm_installed": bool(shutil.which("npm")),
+            "installed_count": len(await self.list_installed())
+        }
+
+    async def refresh(self) -> List[ToolDefinition]:
+        """Reload MCP configuration and restart active sessions."""
+        await self.close_all()
+        return await self.load_and_initialize()
+
     async def close_all(self) -> None:
         for name, session in list(self.sessions.items()):
             try:
@@ -279,3 +336,4 @@ class MCPManager:
         self.sessions.clear()
         self.tools.clear()
         self.tool_map.clear()
+
