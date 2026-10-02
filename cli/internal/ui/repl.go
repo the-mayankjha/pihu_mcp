@@ -2,7 +2,10 @@
 package ui
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +21,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mdp/qrterminal"
 )
 
 var (
@@ -178,25 +182,25 @@ func NewReplModel(projectDir, initialProvider, initialModel string) ReplModel {
 	curKey := DiscoverGeminiKey()
 
 	return ReplModel{
-		client:          ipc.NewClient(projectDir),
-		sess:            sess,
-		ws:              ws,
-		renderer:        render.New(120),
-		input:           ti,
-		paletteInput:    pi,
-		modelFilter:     mf,
-		keyInput:        ki,
-		availableModels: FetchAvailableModels(),
-		availableKeys:   DiscoverAllGeminiKeys(curKey),
-		activeKey:       curKey,
+		client:           ipc.NewClient(projectDir),
+		sess:             sess,
+		ws:               ws,
+		renderer:         render.New(120),
+		input:            ti,
+		paletteInput:     pi,
+		modelFilter:      mf,
+		keyInput:         ki,
+		availableModels:  FetchAvailableModels(),
+		availableKeys:    DiscoverAllGeminiKeys(curKey),
+		activeKey:        curKey,
 		expandedExplores: make(map[string]bool),
-		spinner:         sp,
-		mode:            modeChat,
-		provider:        prov,
-		model:           mod,
-		width:           120,
-		height:          36,
-		scrollOffset:    0,
+		spinner:          sp,
+		mode:             modeChat,
+		provider:         prov,
+		model:            mod,
+		width:            120,
+		height:           36,
+		scrollOffset:     0,
 	}
 }
 
@@ -1112,6 +1116,255 @@ func (m *ReplModel) processEvent(ev events.AgentEvent) {
 	}
 }
 
+func fetchWhatsAppAuthUI(requirePairing bool) string {
+	client := http.Client{Timeout: 1200 * time.Millisecond}
+
+	// 1. Check current status
+	var isLoggedIn bool
+	var userJid, osName, platform string
+	var isSyncing bool
+	var syncProg, chatsCount, msgsCount int
+	var syncStat string
+	stResp, stErr := client.Get("http://localhost:8080/api/status")
+	if stErr == nil && stResp.StatusCode == 200 {
+		var st struct {
+			LoggedIn      bool   `json:"logged_in"`
+			JID           string `json:"jid"`
+			OS            string `json:"os"`
+			Platform      string `json:"platform"`
+			IsSyncing     bool   `json:"is_syncing"`
+			SyncProgress  int    `json:"sync_progress"`
+			SyncStatus    string `json:"sync_status"`
+			ChatsCount    int    `json:"chats_count"`
+			MessagesCount int    `json:"messages_count"`
+		}
+		_ = json.NewDecoder(stResp.Body).Decode(&st)
+		stResp.Body.Close()
+		isLoggedIn = st.LoggedIn
+		userJid = st.JID
+		osName = st.OS
+		platform = st.Platform
+		isSyncing = st.IsSyncing
+		syncProg = st.SyncProgress
+		syncStat = st.SyncStatus
+		chatsCount = st.ChatsCount
+		msgsCount = st.MessagesCount
+	}
+
+	if isLoggedIn {
+		title := lipgloss.NewStyle().Bold(true).Foreground(Green).Render("✔ PIHU WhatsApp MCP — Active & Authenticated")
+		sep := lipgloss.NewStyle().Foreground(colSurf1).Render(strings.Repeat("─", 62))
+
+		statusBadge := lipgloss.NewStyle().Foreground(Green).Bold(true).Render("● Online & Linked")
+		jidLine := lipgloss.NewStyle().Foreground(colMuted).Render("  • Linked JID:    ") + lipgloss.NewStyle().Foreground(Green).Bold(true).Render(userJid)
+		osLine := lipgloss.NewStyle().Foreground(colMuted).Render("  • Device OS:     ") + lipgloss.NewStyle().Foreground(Mauve).Render(osName+" ("+platform+")")
+		bridgeLine := lipgloss.NewStyle().Foreground(colMuted).Render("  • Bridge Engine: ") + lipgloss.NewStyle().Foreground(Sky).Render("whatsmeow + FastMCP (Port 8080)")
+		historyLine := lipgloss.NewStyle().Foreground(colMuted).Render("  • Synced Data:   ") + lipgloss.NewStyle().Foreground(colSubtext).Render(fmt.Sprintf("%d chats · %d messages in SQLite", chatsCount, msgsCount))
+
+		var syncSnippet string
+		if isSyncing {
+			syncSnippet = "\n" + lipgloss.NewStyle().Foreground(Yellow).Render(fmt.Sprintf("  • Sync Progress: [%d%%] %s", syncProg, syncStat))
+		}
+
+		tipsLine := lipgloss.NewStyle().Foreground(colSubtext).Render("  • PIHU Agent is ready: say \"Send a message to [Name] on WhatsApp\" or use /whatsapp send")
+
+		content := fmt.Sprintf("%s\n%s\n\n  Status: %s\n%s\n%s\n%s\n%s%s\n\n%s", title, sep, statusBadge, jidLine, osLine, bridgeLine, historyLine, syncSnippet, tipsLine)
+		return lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(Green).
+			Padding(1, 2).
+			Render(content)
+	}
+
+	// 2. Fetch fresh QR Code
+	if requirePairing {
+		_, _ = client.Post("http://localhost:8080/api/auth", "application/json", nil)
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	qrCodeStr := ""
+	for i := 0; i < 5; i++ {
+		qrResp, qrErr := client.Get("http://localhost:8080/api/qr")
+		if qrErr == nil && qrResp.StatusCode == 200 {
+			var q struct {
+				QRCode string `json:"qr_code"`
+			}
+			_ = json.NewDecoder(qrResp.Body).Decode(&q)
+			qrResp.Body.Close()
+			if q.QRCode != "" {
+				qrCodeStr = q.QRCode
+				break
+			}
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+
+	title := lipgloss.NewStyle().Bold(true).Foreground(Mauve).Render("◈ PIHU WhatsApp Device Authentication")
+	sep := lipgloss.NewStyle().Foreground(colSurf1).Render(strings.Repeat("─", 62))
+	statusBadge := lipgloss.NewStyle().Foreground(Yellow).Bold(true).Render("● Pairing Required (Scan with your phone)")
+
+	stepsHeader := lipgloss.NewStyle().Foreground(Mauve).Bold(true).Render("PAIRING INSTRUCTIONS:")
+	steps := lipgloss.NewStyle().Foreground(TextMain).Render(
+		"  1. Open WhatsApp on your mobile phone\n" +
+			"  2. Go to Settings > Linked Devices > Link a Device\n" +
+			"  3. Point your camera at the QR code below (Device: PIHU Desktop):",
+	)
+
+	var qrBox string
+	if qrCodeStr != "" {
+		var qrBuf bytes.Buffer
+		qrterminal.GenerateHalfBlock(qrCodeStr, qrterminal.L, &qrBuf)
+		qrBox = strings.TrimRight(qrBuf.String(), "\n")
+	} else {
+		qrBox = lipgloss.NewStyle().Foreground(Yellow).Render("  Starting WhatsApp pairing daemon... Run /whatsapp auth to refresh.")
+	}
+
+	footer := lipgloss.NewStyle().Foreground(colMuted).Render(
+		"Commands: /whatsapp send <contact> <msg>  ·  /whatsapp sync  ·  /whatsapp status\n" +
+			"Also available in PIHU Desktop Settings > Connections",
+	)
+
+	content := fmt.Sprintf("%s\n%s\n\n  Status: %s\n\n%s\n%s\n\n%s\n\n%s", title, sep, statusBadge, stepsHeader, steps, qrBox, footer)
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(Mauve).
+		Padding(1, 2).
+		Render(content)
+}
+
+type sharedContact struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Nickname string `json:"nickname,omitempty"`
+	Phone    string `json:"phone,omitempty"`
+}
+
+func replContactsPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "contacts.json"
+	}
+	return filepath.Join(home, ".pihu", "contacts.json")
+}
+
+func readReplContacts() ([]sharedContact, error) {
+	data, err := os.ReadFile(replContactsPath())
+	if os.IsNotExist(err) {
+		return []sharedContact{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var contacts []sharedContact
+	return contacts, json.Unmarshal(data, &contacts)
+}
+
+func writeReplContacts(contacts []sharedContact) error {
+	path := replContactsPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(contacts, "", "  ")
+	if err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(path), "contacts-*.json")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if _, err := temporary.Write(data); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Chmod(0600); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryPath, path)
+}
+
+func replContactIndex(contacts []sharedContact, selector string) int {
+	selector = strings.ToLower(selector)
+	for index, contact := range contacts {
+		if strings.ToLower(contact.ID) == selector || strings.ToLower(contact.Name) == selector || strings.ToLower(contact.Nickname) == selector {
+			return index
+		}
+	}
+	return -1
+}
+
+func digitsOnly(value string) string {
+	var out strings.Builder
+	for _, char := range value {
+		if char >= '0' && char <= '9' {
+			out.WriteRune(char)
+		}
+	}
+	return out.String()
+}
+
+func contactsHelp() string {
+	return "Contacts use the shared ~/.pihu/contacts.json directory.\n" +
+		"  /contacts list\n" +
+		"  /contacts add <name> <phone> [nickname]\n" +
+		"  /contacts edit <existing-name> <name> <phone> [nickname]\n" +
+		"  /contacts remove <name-or-id>"
+}
+
+func fetchWhatsAppSyncUI() string {
+	client := http.Client{Timeout: 3000 * time.Millisecond}
+	_, _ = client.Post("http://localhost:8080/api/sync", "application/json", nil)
+	time.Sleep(300 * time.Millisecond)
+
+	stResp, err := client.Get("http://localhost:8080/api/status")
+	if err != nil {
+		return lipgloss.NewStyle().Foreground(Peach).Render("✗ WhatsApp bridge daemon is offline.")
+	}
+	defer stResp.Body.Close()
+
+	var st struct {
+		LoggedIn      bool   `json:"logged_in"`
+		JID           string `json:"jid"`
+		IsSyncing     bool   `json:"is_syncing"`
+		SyncProgress  int    `json:"sync_progress"`
+		SyncStatus    string `json:"sync_status"`
+		ChatsCount    int    `json:"chats_count"`
+		MessagesCount int    `json:"messages_count"`
+	}
+	_ = json.NewDecoder(stResp.Body).Decode(&st)
+
+	if !st.LoggedIn {
+		return lipgloss.NewStyle().Foreground(Yellow).Render("○ WhatsApp is not paired yet. Run /whatsapp auth to pair first.")
+	}
+
+	pct := st.SyncProgress
+	if pct <= 0 {
+		pct = 20
+	}
+	barWidth := 20
+	filled := (pct * barWidth) / 100
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+
+	title := lipgloss.NewStyle().Bold(true).Foreground(Mauve).Render("⠋ PIHU WhatsApp History Synchronization")
+	sep := lipgloss.NewStyle().Foreground(colSurf1).Render(strings.Repeat("─", 58))
+	barDisplay := lipgloss.NewStyle().Foreground(Mauve).Render("["+bar+"] ") + lipgloss.NewStyle().Foreground(Sky).Bold(true).Render(fmt.Sprintf("%d%%", pct))
+	statusDisplay := lipgloss.NewStyle().Foreground(colSubtext).Render(fmt.Sprintf("• Status: %s", st.SyncStatus))
+	statsDisplay := lipgloss.NewStyle().Foreground(Green).Bold(true).Render(fmt.Sprintf("• Stored in SQLite: %d chats · %d messages", st.ChatsCount, st.MessagesCount))
+	tipDisplay := lipgloss.NewStyle().Foreground(colMuted).Render("Synchronization is active in background. Run /whatsapp status anytime to check live counts.")
+
+	content := fmt.Sprintf("%s\n%s\n\n  Progress: %s\n  %s\n  %s\n\n  %s", title, sep, barDisplay, statusDisplay, statsDisplay, tipDisplay)
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(Mauve).
+		Padding(1, 2).
+		Render(content)
+}
+
 // ─── Slash Commands ──────────────────────────────────────────────────────────
 
 func (m ReplModel) runSlashCommand(cmd string) (tea.Model, tea.Cmd) {
@@ -1167,11 +1420,37 @@ func (m ReplModel) runSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 				if len(parts) > 2 {
 					action = strings.ToLower(parts[2])
 				}
-				if action == "auth" || action == "login" {
-					m.sess.AddSystem("◈ WhatsApp MCP Authentication\n1. Open WhatsApp on your phone\n2. Go to Settings > Linked Devices > Link a Device\n3. QR Pairing channel is active. Scan QR in Settings > Connections or run 'pihu mcp whatsapp auth' in terminal.")
+				if action == "auth" || action == "login" || action == "pair" {
+					card := fetchWhatsAppAuthUI(true)
+					m.sess.Messages = append(m.sess.Messages, session.Message{
+						Role: session.RoleSystem, Text: card, Timestamp: time.Now(),
+					})
+					return m, nil
+				} else if action == "sync" || action == "sync-chats" || action == "history" {
+					card := fetchWhatsAppSyncUI()
+					m.sess.Messages = append(m.sess.Messages, session.Message{
+						Role: session.RoleSystem, Text: card, Timestamp: time.Now(),
+					})
+					return m, nil
+				} else if action == "status" {
+					card := fetchWhatsAppAuthUI(false)
+					m.sess.Messages = append(m.sess.Messages, session.Message{
+						Role: session.RoleSystem, Text: card, Timestamp: time.Now(),
+					})
 					return m, nil
 				} else if action == "logout" {
+					go func() {
+						client := http.Client{Timeout: 2 * time.Second}
+						_, _ = client.Post("http://localhost:8080/api/logout", "application/json", nil)
+					}()
 					m.sess.AddSystem("✓ WhatsApp session unlinked.")
+					return m, nil
+				} else if action == "clear" || action == "clear-data" || action == "reset" {
+					go func() {
+						client := http.Client{Timeout: 2 * time.Second}
+						_, _ = client.Post("http://localhost:8080/api/clear", "application/json", nil)
+					}()
+					m.sess.AddSystem("✔ WhatsApp session tokens, chat history and cached data cleared successfully.")
 					return m, nil
 				} else if action == "send" {
 					if len(parts) < 4 {
@@ -1183,7 +1462,10 @@ func (m ReplModel) runSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 					m.sess.AddSystem(fmt.Sprintf("==> Sending WhatsApp message to '%s': \"%s\"...", target, msg))
 					return m.submitPrompt(fmt.Sprintf("send a whatsapp message to %s saying: %s", target, msg))
 				} else {
-					m.sess.AddSystem("● WhatsApp MCP Bridge Status: Ready.\nUse '/mcp whatsapp auth' to pair via QR code, '/mcp whatsapp send <contact> <msg>', or view in Settings > Connections.")
+					card := fetchWhatsAppAuthUI(false)
+					m.sess.Messages = append(m.sess.Messages, session.Message{
+						Role: session.RoleSystem, Text: card, Timestamp: time.Now(),
+					})
 					return m, nil
 				}
 			}
@@ -1191,13 +1473,120 @@ func (m ReplModel) runSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.openMCPMarket()
 		return m, nil
 
+	case "/contacts", "/contact":
+		action := "list"
+		if len(parts) > 1 {
+			action = strings.ToLower(parts[1])
+		}
+		contacts, err := readReplContacts()
+		if err != nil {
+			m.sess.AddSystem("✗ Could not read shared contacts: " + err.Error())
+			return m, nil
+		}
+		switch action {
+		case "list", "ls":
+			if len(contacts) == 0 {
+				m.sess.AddSystem("No saved contacts.\n" + contactsHelp())
+				return m, nil
+			}
+			lines := []string{"PIHU contacts — ~/.pihu/contacts.json"}
+			for _, contact := range contacts {
+				label := contact.Name
+				if contact.Nickname != "" {
+					label += " (" + contact.Nickname + ")"
+				}
+				lines = append(lines, fmt.Sprintf("  • %s — %s", label, contact.Phone))
+			}
+			m.sess.AddSystem(strings.Join(lines, "\n"))
+		case "add":
+			if len(parts) < 4 {
+				m.sess.AddSystem("Usage: /contacts add <name> <phone> [nickname]")
+				return m, nil
+			}
+			if replContactIndex(contacts, parts[2]) >= 0 {
+				m.sess.AddSystem("A contact with that name already exists. Use /contacts edit instead.")
+				return m, nil
+			}
+			phone := digitsOnly(parts[3])
+			if len(phone) < 7 {
+				m.sess.AddSystem("A contact phone number must contain at least 7 digits.")
+				return m, nil
+			}
+			contact := sharedContact{ID: fmt.Sprintf("person-%d", time.Now().UnixNano()), Name: parts[2], Phone: phone}
+			if len(parts) > 4 {
+				contact.Nickname = parts[4]
+			}
+			if err := writeReplContacts(append(contacts, contact)); err != nil {
+				m.sess.AddSystem("✗ Could not save contact: " + err.Error())
+			} else {
+				m.sess.AddSystem(fmt.Sprintf("✓ Saved %s → %s to ~/.pihu/contacts.json", contact.Name, contact.Phone))
+			}
+		case "edit", "update":
+			if len(parts) < 5 {
+				m.sess.AddSystem("Usage: /contacts edit <existing-name> <name> <phone> [nickname]")
+				return m, nil
+			}
+			index := replContactIndex(contacts, parts[2])
+			if index < 0 {
+				m.sess.AddSystem("Contact not found: " + parts[2])
+				return m, nil
+			}
+			phone := digitsOnly(parts[4])
+			if len(phone) < 7 {
+				m.sess.AddSystem("A contact phone number must contain at least 7 digits.")
+				return m, nil
+			}
+			contacts[index].Name, contacts[index].Phone, contacts[index].Nickname = parts[3], phone, ""
+			if len(parts) > 5 {
+				contacts[index].Nickname = parts[5]
+			}
+			if err := writeReplContacts(contacts); err != nil {
+				m.sess.AddSystem("✗ Could not save contact: " + err.Error())
+			} else {
+				m.sess.AddSystem("✓ Updated contact in ~/.pihu/contacts.json")
+			}
+		case "remove", "delete", "rm":
+			if len(parts) != 3 {
+				m.sess.AddSystem("Usage: /contacts remove <name-or-id>")
+				return m, nil
+			}
+			index := replContactIndex(contacts, parts[2])
+			if index < 0 {
+				m.sess.AddSystem("Contact not found: " + parts[2])
+				return m, nil
+			}
+			removed := contacts[index].Name
+			contacts = append(contacts[:index], contacts[index+1:]...)
+			if err := writeReplContacts(contacts); err != nil {
+				m.sess.AddSystem("✗ Could not save contact: " + err.Error())
+			} else {
+				m.sess.AddSystem("✓ Removed " + removed + " from ~/.pihu/contacts.json")
+			}
+		default:
+			m.sess.AddSystem(contactsHelp())
+		}
+		return m, nil
+
 	case "/whatsapp":
 		action := "status"
 		if len(parts) > 1 {
 			action = strings.ToLower(parts[1])
 		}
-		if action == "auth" || action == "login" {
-			m.sess.AddSystem("◈ WhatsApp MCP Authentication\n1. Open WhatsApp on your phone\n2. Go to Settings > Linked Devices > Link a Device\n3. Scan QR in Settings > Connections > WhatsApp MCP or run 'pihu mcp whatsapp auth'.")
+		if action == "auth" || action == "login" || action == "pair" {
+			card := fetchWhatsAppAuthUI(true)
+			m.sess.Messages = append(m.sess.Messages, session.Message{
+				Role: session.RoleSystem, Text: card, Timestamp: time.Now(),
+			})
+		} else if action == "sync" || action == "sync-chats" || action == "history" {
+			card := fetchWhatsAppSyncUI()
+			m.sess.Messages = append(m.sess.Messages, session.Message{
+				Role: session.RoleSystem, Text: card, Timestamp: time.Now(),
+			})
+		} else if action == "status" {
+			card := fetchWhatsAppAuthUI(false)
+			m.sess.Messages = append(m.sess.Messages, session.Message{
+				Role: session.RoleSystem, Text: card, Timestamp: time.Now(),
+			})
 		} else if action == "send" {
 			if len(parts) < 3 {
 				m.sess.AddSystem("Usage: /whatsapp send <contact_or_number> <message>\nExample: /whatsapp send anin Hi this is test\nExample: /whatsapp send 9926674532 Hello!")
@@ -1208,9 +1597,22 @@ func (m ReplModel) runSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 			m.sess.AddSystem(fmt.Sprintf("==> Sending WhatsApp message to '%s': \"%s\"...", target, msg))
 			return m.submitPrompt(fmt.Sprintf("send a whatsapp message to %s saying: %s", target, msg))
 		} else if action == "logout" {
+			go func() {
+				client := http.Client{Timeout: 2 * time.Second}
+				_, _ = client.Post("http://localhost:8080/api/logout", "application/json", nil)
+			}()
 			m.sess.AddSystem("✓ WhatsApp session unlinked.")
+		} else if action == "clear" || action == "clear-data" || action == "reset" {
+			go func() {
+				client := http.Client{Timeout: 2 * time.Second}
+				_, _ = client.Post("http://localhost:8080/api/clear", "application/json", nil)
+			}()
+			m.sess.AddSystem("✔ WhatsApp session tokens, chat history and cached data cleared successfully.")
 		} else {
-			m.sess.AddSystem("● WhatsApp MCP Integration: Active.\nCommands: /whatsapp send <contact|number> <msg>, /whatsapp auth, /whatsapp status, /whatsapp logout\nOr use natural language: 'send a message to [Name] on WhatsApp'")
+			card := fetchWhatsAppAuthUI(false)
+			m.sess.Messages = append(m.sess.Messages, session.Message{
+				Role: session.RoleSystem, Text: card, Timestamp: time.Now(),
+			})
 		}
 		return m, nil
 
@@ -1645,7 +2047,11 @@ func (m ReplModel) renderMsg(msg session.Message, msgIdx int, w int) []string {
 
 	case session.RoleSystem:
 		for _, l := range strings.Split(msg.Text, "\n") {
-			lines = append(lines, lipgloss.NewStyle().Foreground(colMuted).Render(l))
+			if strings.Contains(l, "\x1b[") || strings.Contains(l, "─") || strings.Contains(l, "╭") || strings.Contains(l, "│") || strings.Contains(l, "█") || strings.Contains(l, "▀") || strings.Contains(l, "▄") || strings.Contains(l, "✔") || strings.Contains(l, "◈") {
+				lines = append(lines, l)
+			} else {
+				lines = append(lines, lipgloss.NewStyle().Foreground(colMuted).Render(l))
+			}
 		}
 	}
 
@@ -1949,10 +2355,10 @@ func (m ReplModel) viewSidebar(w, h int) string {
 	// Compact PIHU ASCII art at top of sidebar
 	art := lipgloss.NewStyle().Foreground(colMauve).Bold(true).Render(
 		"  ____ ___ _   _ _   _\n" +
-		" |  _ \\_ _| | | | | | |\n" +
-		" | |_) | || |_| | | | |\n" +
-		" |  __/| ||  _  | |_| |\n" +
-		" |_|  |___|_| |_|\\___/",
+			" |  _ \\_ _| | | | | | |\n" +
+			" | |_) | || |_| | | | |\n" +
+			" |  __/| ||  _  | |_| |\n" +
+			" |_|  |___|_| |_|\\___/",
 	)
 	subtitle := lipgloss.NewStyle().Foreground(colMuted).Render(" AI Terminal IDE v0.1.0")
 	sections = append(sections, art, subtitle, "")

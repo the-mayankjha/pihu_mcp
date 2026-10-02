@@ -40,6 +40,9 @@ var chatCmd = &cobra.Command{
 	Short: "Start interactive PIHU Agent REPL (Bubble Tea TUI)",
 	Run: func(cmd *cobra.Command, args []string) {
 		cwd, _ := os.Getwd()
+		// The REPL only reads the bridge API. Start the single shared daemon once
+		// here, rather than having the REPL maintain a second WhatsApp client.
+		_ = ensureWhatsAppBridgeRunning()
 		runInteractiveREPL(findProjectRoot(cwd), providerFlag, modelFlag)
 	},
 }
@@ -202,10 +205,10 @@ var mcpListCmd = &cobra.Command{
 		fmt.Println(lipgloss.NewStyle().Foreground(cmdSurf1).Render(strings.Repeat("─", 70)))
 
 		servers := []struct {
-			Name      string
-			Runtime   string
-			Status    string
-			Tools     int
+			Name    string
+			Runtime string
+			Status  string
+			Tools   int
 		}{
 			{"pihu-file-mcp", "python (uv)", "enabled", 24},
 			{"pihu-system-mcp", "python (uv)", "enabled", 7},
@@ -352,6 +355,55 @@ type PihuContact struct {
 	Notes       string `json:"notes"`
 }
 
+// contactDirectoryPath is intentionally independent of the current workspace:
+// Desktop, CLI, REPL and the WhatsApp resolver all use this one directory.
+func contactDirectoryPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "contacts.json"
+	}
+	return filepath.Join(home, ".pihu", "contacts.json")
+}
+
+func saveAllContacts(contacts []PihuContact) error {
+	path := contactDirectoryPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(contacts, "", "  ")
+	if err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(path), "contacts-*.json")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if _, err := temporary.Write(data); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Chmod(0600); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryPath, path)
+}
+
+func findContactIndex(contacts []PihuContact, selector string) int {
+	needle := strings.ToLower(strings.TrimSpace(selector))
+	for index, contact := range contacts {
+		if strings.ToLower(contact.ID) == needle || strings.ToLower(contact.Name) == needle || strings.ToLower(contact.Nickname) == needle {
+			return index
+		}
+	}
+	return -1
+}
+
 func loadAllContacts() []PihuContact {
 	var contacts []PihuContact
 	home, _ := os.UserHomeDir()
@@ -476,9 +528,107 @@ func cleanDigits(s string) string {
 	return sb.String()
 }
 
+var contactsCmd = &cobra.Command{
+	Use:   "contacts [list|add|edit|remove]",
+	Short: "Manage the shared PIHU contact directory (~/.pihu/contacts.json)",
+	Run: func(cmd *cobra.Command, args []string) {
+		contacts := loadAllContacts()
+		if len(contacts) == 0 {
+			fmt.Println("No contacts saved. Add one with: pihu contacts add \"Anin\" 9926674532")
+			return
+		}
+		fmt.Printf("PIHU contacts (%s)\n", contactDirectoryPath())
+		for _, contact := range contacts {
+			label := contact.Name
+			if contact.Nickname != "" {
+				label += " (" + contact.Nickname + ")"
+			}
+			fmt.Printf("  • %s  %s\n", label, contact.Phone)
+		}
+	},
+}
+
+var contactsAddCmd = &cobra.Command{
+	Use:   "add <name> <phone> [nickname]",
+	Short: "Add a contact to the shared directory",
+	Args:  cobra.RangeArgs(2, 3),
+	Run: func(cmd *cobra.Command, args []string) {
+		phone := cleanDigits(args[1])
+		if len(phone) < 7 {
+			fmt.Println("A contact phone number must contain at least 7 digits.")
+			return
+		}
+		contacts := loadAllContacts()
+		if findContactIndex(contacts, args[0]) >= 0 {
+			fmt.Printf("Contact %q already exists. Use `pihu contacts edit %q <name> <phone>`.\n", args[0], args[0])
+			return
+		}
+		contact := PihuContact{ID: fmt.Sprintf("person-%d", time.Now().UnixNano()), Name: strings.TrimSpace(args[0]), Phone: phone}
+		if len(args) == 3 {
+			contact.Nickname = strings.TrimSpace(args[2])
+		}
+		contacts = append(contacts, contact)
+		if err := saveAllContacts(contacts); err != nil {
+			fmt.Println("Could not save contacts:", err)
+			return
+		}
+		fmt.Printf("Saved %s → %s in %s\n", contact.Name, contact.Phone, contactDirectoryPath())
+	},
+}
+
+var contactsEditCmd = &cobra.Command{
+	Use:   "edit <existing-name-or-id> <name> <phone> [nickname]",
+	Short: "Edit a contact in the shared directory",
+	Args:  cobra.RangeArgs(3, 4),
+	Run: func(cmd *cobra.Command, args []string) {
+		contacts := loadAllContacts()
+		index := findContactIndex(contacts, args[0])
+		if index < 0 {
+			fmt.Printf("Contact %q was not found.\n", args[0])
+			return
+		}
+		phone := cleanDigits(args[2])
+		if len(phone) < 7 {
+			fmt.Println("A contact phone number must contain at least 7 digits.")
+			return
+		}
+		contacts[index].Name, contacts[index].Phone = strings.TrimSpace(args[1]), phone
+		contacts[index].Nickname = ""
+		if len(args) == 4 {
+			contacts[index].Nickname = strings.TrimSpace(args[3])
+		}
+		if err := saveAllContacts(contacts); err != nil {
+			fmt.Println("Could not save contacts:", err)
+			return
+		}
+		fmt.Printf("Updated %s in %s\n", contacts[index].Name, contactDirectoryPath())
+	},
+}
+
+var contactsRemoveCmd = &cobra.Command{
+	Use:   "remove <name-or-id>",
+	Short: "Remove a contact from the shared directory",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		contacts := loadAllContacts()
+		index := findContactIndex(contacts, args[0])
+		if index < 0 {
+			fmt.Printf("Contact %q was not found.\n", args[0])
+			return
+		}
+		removed := contacts[index].Name
+		contacts = append(contacts[:index], contacts[index+1:]...)
+		if err := saveAllContacts(contacts); err != nil {
+			fmt.Println("Could not save contacts:", err)
+			return
+		}
+		fmt.Printf("Removed %s from %s\n", removed, contactDirectoryPath())
+	},
+}
+
 var mcpWhatsappCmd = &cobra.Command{
-	Use:   "whatsapp [auth|login|status|logout|send]",
-	Short: "WhatsApp MCP authentication, messaging, status check, and device pairing",
+	Use:   "whatsapp [auth|login|status|sync|logout|clear-data|send]",
+	Short: "WhatsApp MCP authentication, messaging, history sync, status check, and data management",
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 {
 			mcpWhatsappStatusCmd.Run(cmd, args)
@@ -487,13 +637,119 @@ var mcpWhatsappCmd = &cobra.Command{
 		sub := strings.ToLower(args[0])
 		if sub == "auth" || sub == "login" {
 			mcpWhatsappAuthCmd.Run(cmd, args)
+		} else if sub == "sync" || sub == "sync-chats" || sub == "history" {
+			mcpWhatsappSyncCmd.Run(cmd, args)
 		} else if sub == "logout" {
 			mcpWhatsappLogoutCmd.Run(cmd, args)
+		} else if sub == "clear" || sub == "clear-data" || sub == "reset" || sub == "purge" {
+			mcpWhatsappClearCmd.Run(cmd, args)
 		} else if sub == "send" {
 			mcpWhatsappSendCmd.Run(cmd, args[1:])
 		} else {
 			mcpWhatsappStatusCmd.Run(cmd, args)
 		}
+	},
+}
+
+var mcpWhatsappSyncCmd = &cobra.Command{
+	Use:     "sync",
+	Aliases: []string{"sync-chats", "history"},
+	Short:   "Synchronize WhatsApp chats and messages with animated progress indicator",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Println(ui.RenderAsciiArt())
+		fmt.Println()
+		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(cmdMauve).Render("● PIHU WhatsApp Chat & History Synchronization"))
+		fmt.Println(lipgloss.NewStyle().Foreground(cmdSurf1).Render(strings.Repeat("─", 70)))
+
+		_ = ensureWhatsAppBridgeRunning()
+		client := http.Client{Timeout: 3000 * time.Millisecond}
+
+		// Check status first
+		stResp, err := client.Get("http://localhost:8080/api/status")
+		if err != nil {
+			fmt.Println(lipgloss.NewStyle().Foreground(cmdPeach).Render("✗ WhatsApp bridge daemon is offline. Run 'pihu mcp whatsapp auth' first."))
+			return
+		}
+		var st struct {
+			LoggedIn      bool   `json:"logged_in"`
+			JID           string `json:"jid"`
+			IsSyncing     bool   `json:"is_syncing"`
+			SyncProgress  int    `json:"sync_progress"`
+			SyncStatus    string `json:"sync_status"`
+			ChatsCount    int    `json:"chats_count"`
+			MessagesCount int    `json:"messages_count"`
+		}
+		_ = json.NewDecoder(stResp.Body).Decode(&st)
+		stResp.Body.Close()
+
+		if !st.LoggedIn {
+			fmt.Println(lipgloss.NewStyle().Foreground(cmdYellow).Render("○ WhatsApp is not paired yet. Please run 'pihu mcp whatsapp auth' first."))
+			return
+		}
+
+		// Trigger sync
+		_, _ = client.Post("http://localhost:8080/api/sync", "application/json", nil)
+
+		spinnerFrames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+		frameIdx := 0
+
+		fmt.Printf("Connected: %s\n\n", lipgloss.NewStyle().Foreground(cmdGreen).Bold(true).Render(st.JID))
+
+		// Render live animated progress bar loop in terminal
+		for i := 0; i < 35; i++ {
+			pollResp, pErr := client.Get("http://localhost:8080/api/status")
+			if pErr == nil {
+				var pollSt struct {
+					IsSyncing     bool   `json:"is_syncing"`
+					SyncProgress  int    `json:"sync_progress"`
+					SyncStatus    string `json:"sync_status"`
+					ChatsCount    int    `json:"chats_count"`
+					MessagesCount int    `json:"messages_count"`
+				}
+				_ = json.NewDecoder(pollResp.Body).Decode(&pollSt)
+				pollResp.Body.Close()
+
+				spinnerChar := spinnerFrames[frameIdx%len(spinnerFrames)]
+				frameIdx++
+
+				pct := pollSt.SyncProgress
+				if pct > 100 {
+					pct = 100
+				}
+				if pct < 0 {
+					pct = 0
+				}
+
+				// Build progress bar: 24 width
+				barWidth := 24
+				filled := (pct * barWidth) / 100
+				bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+
+				barStyle := lipgloss.NewStyle().Foreground(cmdMauve).Render("[" + bar + "]")
+				pctStyle := lipgloss.NewStyle().Foreground(cmdSapph).Bold(true).Render(fmt.Sprintf("%3d%%", pct))
+				spinStyle := lipgloss.NewStyle().Foreground(cmdYellow).Render(spinnerChar)
+				metaStyle := lipgloss.NewStyle().Foreground(cmdMuted).Render(fmt.Sprintf("%d chats · %d msgs", pollSt.ChatsCount, pollSt.MessagesCount))
+
+				statusText := pollSt.SyncStatus
+				if statusText == "" {
+					statusText = "Syncing with WhatsApp socket..."
+				}
+
+				fmt.Printf("\r  %s %s %s  %s  │  %s", spinStyle, barStyle, pctStyle, metaStyle, lipgloss.NewStyle().Foreground(cmdSubtext).Render(statusText))
+
+				if !pollSt.IsSyncing && i > 3 {
+					fmt.Printf("\n\n")
+					fmt.Println(lipgloss.NewStyle().Foreground(cmdGreen).Bold(true).Render(fmt.Sprintf("✔ WhatsApp synchronization complete! Total: %d chats, %d messages stored in SQLite.", pollSt.ChatsCount, pollSt.MessagesCount)))
+					fmt.Println()
+					return
+				}
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
+
+		fmt.Println()
+		fmt.Println(lipgloss.NewStyle().Foreground(cmdGreen).Render("✓ WhatsApp background synchronization is active."))
+		fmt.Println()
 	},
 }
 
@@ -626,11 +882,16 @@ var mcpWhatsappStatusCmd = &cobra.Command{
 		}
 		defer resp.Body.Close()
 		var st struct {
-			Connected bool   `json:"connected"`
-			LoggedIn  bool   `json:"logged_in"`
-			JID       string `json:"jid"`
-			OS        string `json:"os"`
-			Platform  string `json:"platform"`
+			Connected     bool   `json:"connected"`
+			LoggedIn      bool   `json:"logged_in"`
+			JID           string `json:"jid"`
+			OS            string `json:"os"`
+			Platform      string `json:"platform"`
+			IsSyncing     bool   `json:"is_syncing"`
+			SyncProgress  int    `json:"sync_progress"`
+			SyncStatus    string `json:"sync_status"`
+			ChatsCount    int    `json:"chats_count"`
+			MessagesCount int    `json:"messages_count"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
 			fmt.Println("  ✗ Error reading bridge status")
@@ -639,9 +900,13 @@ var mcpWhatsappStatusCmd = &cobra.Command{
 
 		if st.LoggedIn {
 			fmt.Println(lipgloss.NewStyle().Foreground(cmdGreen).Bold(true).Render("  ✓ WhatsApp Session: Authenticated & Connected"))
-			fmt.Println("    Device OS:   " + st.OS)
-			fmt.Println("    Platform:    " + st.Platform)
-			fmt.Println("    Linked JID:  " + st.JID)
+			fmt.Println("    Device OS:      " + st.OS)
+			fmt.Println("    Platform:       " + st.Platform)
+			fmt.Println("    Linked JID:     " + st.JID)
+			fmt.Printf("    Synced History: %d chats · %d messages stored in ~/.pihu/whatsapp/\n", st.ChatsCount, st.MessagesCount)
+			if st.IsSyncing {
+				fmt.Printf("    Sync Status:    %s (%d%%)\n", st.SyncStatus, st.SyncProgress)
+			}
 		} else {
 			fmt.Println(lipgloss.NewStyle().Foreground(cmdYellow).Bold(true).Render("  ○ WhatsApp Session: Pairing Required (Not Linked)"))
 			fmt.Println("    Run 'pihu mcp whatsapp auth' to pair your phone via QR code.")
@@ -684,6 +949,9 @@ var mcpWhatsappAuthCmd = &cobra.Command{
 		}
 
 		fmt.Println(lipgloss.NewStyle().Foreground(cmdGreen).Bold(true).Render("✓ Bridge daemon active on http://localhost:8080"))
+		// This is the same bridge-owned authentication request used by the REPL
+		// and Desktop settings. The command never starts a separate WA client.
+		_, _ = client.Post("http://localhost:8080/api/auth", "application/json", nil)
 		fmt.Println()
 		fmt.Println("1. Open WhatsApp on your mobile phone")
 		fmt.Println("2. Go to Settings > Linked Devices > Link a Device")
@@ -759,6 +1027,44 @@ var mcpWhatsappLogoutCmd = &cobra.Command{
 		}
 		defer resp.Body.Close()
 		fmt.Println(lipgloss.NewStyle().Foreground(cmdGreen).Bold(true).Render("✓ WhatsApp session unlinked successfully."))
+	},
+}
+
+var mcpWhatsappClearCmd = &cobra.Command{
+	Use:     "clear-data",
+	Aliases: []string{"clear", "reset", "purge"},
+	Short:   "Clear all local WhatsApp session tokens, message database, and cache data",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Println(ui.RenderAsciiArt())
+		fmt.Println()
+		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(cmdMauve).Render("● PIHU WhatsApp Data Cleaner"))
+		fmt.Println(lipgloss.NewStyle().Foreground(cmdSurf1).Render(strings.Repeat("─", 70)))
+
+		client := http.Client{Timeout: 3000 * time.Millisecond}
+		resp, err := client.Post("http://localhost:8080/api/clear", "application/json", nil)
+		if err == nil {
+			defer resp.Body.Close()
+			var res struct {
+				Success bool   `json:"success"`
+				Message string `json:"message"`
+			}
+			json.NewDecoder(resp.Body).Decode(&res)
+			if res.Success {
+				fmt.Println(lipgloss.NewStyle().Foreground(cmdGreen).Bold(true).Render("✔ " + res.Message))
+			} else {
+				fmt.Println(lipgloss.NewStyle().Foreground(cmdGreen).Bold(true).Render("✔ Local WhatsApp session and databases reset."))
+			}
+		} else {
+			dir, _ := findWhatsAppBridgeDir()
+			if dir != "" {
+				storeDir := filepath.Join(dir, "store")
+				_ = os.RemoveAll(storeDir)
+				fmt.Printf("  ✓ Removed local store directory: %s\n", storeDir)
+			}
+			fmt.Println(lipgloss.NewStyle().Foreground(cmdGreen).Bold(true).Render("✔ WhatsApp local databases and credentials purged successfully."))
+		}
+		fmt.Println("  Run 'pihu mcp whatsapp auth' to pair with a new WhatsApp device.")
+		fmt.Println()
 	},
 }
 

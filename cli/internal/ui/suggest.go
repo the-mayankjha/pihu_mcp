@@ -9,9 +9,9 @@ import (
 
 // CommandSuggestion describes a slash command or argument completion.
 type CommandSuggestion struct {
-	Command string // e.g. "/model"
-	Syntax  string // e.g. "/model [name]"
-	Desc    string // e.g. "Switch active LLM model"
+	Command string   // e.g. "/model"
+	Syntax  string   // e.g. "/model [name]"
+	Desc    string   // e.g. "Switch active LLM model"
 	Args    []string // suggestions for arguments
 }
 
@@ -44,13 +44,19 @@ var SlashCommands = []CommandSuggestion{
 		Command: "/mcp",
 		Syntax:  "/mcp [browse|whatsapp|list]",
 		Desc:    "MCP Registry & tools: browse catalog or authenticate servers",
-		Args:    []string{"browse", "list", "install", "whatsapp auth", "whatsapp send", "whatsapp status", "whatsapp logout", "sqlite", "postgres", "github", "docker"},
+		Args:    []string{"browse", "list", "install", "whatsapp auth", "whatsapp send", "whatsapp status", "whatsapp clear-data", "whatsapp logout", "sqlite", "postgres", "github", "docker"},
 	},
 	{
 		Command: "/whatsapp",
-		Syntax:  "/whatsapp [send|auth|status|logout]",
-		Desc:    "WhatsApp MCP: Send messages, QR pairing, health check & session management",
-		Args:    []string{"send", "auth", "status", "logout"},
+		Syntax:  "/whatsapp [send|auth|status|clear-data|logout]",
+		Desc:    "WhatsApp MCP: Send messages, QR pairing, clear data, health check & session management",
+		Args:    []string{"send", "auth", "status", "clear-data", "clear", "logout"},
+	},
+	{
+		Command: "/contacts",
+		Syntax:  "/contacts [list|add|edit|remove]",
+		Desc:    "Manage the shared ~/.pihu/contacts.json directory",
+		Args:    []string{"list", "add", "edit", "remove"},
 	},
 	{
 		Command: "/tools",

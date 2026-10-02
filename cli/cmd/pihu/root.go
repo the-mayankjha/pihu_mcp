@@ -64,14 +64,17 @@ func init() {
 	mcpWhatsappCmd.AddCommand(mcpWhatsappAuthCmd)
 	mcpWhatsappCmd.AddCommand(mcpWhatsappStatusCmd)
 	mcpWhatsappCmd.AddCommand(mcpWhatsappLogoutCmd)
+	mcpWhatsappCmd.AddCommand(mcpWhatsappClearCmd)
 	mcpWhatsappCmd.AddCommand(mcpWhatsappSendCmd)
 	mcpCmd.AddCommand(mcpWhatsappCmd)
+	contactsCmd.AddCommand(contactsAddCmd, contactsEditCmd, contactsRemoveCmd)
 
 	rootCmd.AddCommand(chatCmd)
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(toolsCmd)
 	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(mcpWhatsappCmd)
+	rootCmd.AddCommand(contactsCmd)
 	rootCmd.AddCommand(versionCmd)
 }
 
