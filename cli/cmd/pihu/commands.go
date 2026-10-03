@@ -286,12 +286,16 @@ var mcpRefreshCmd = &cobra.Command{
 func findWhatsAppBridgeDir() (string, string) {
 	candidates := []string{
 		"src-tauri/pihu_mcps/mcp/servers/pihu-whatsapp-mcp/whatsapp-bridge",
+		"pihu_mcps/mcp/servers/pihu-whatsapp-mcp/whatsapp-bridge",
 		"../mcp/servers/pihu-whatsapp-mcp/whatsapp-bridge",
 		"mcp/servers/pihu-whatsapp-mcp/whatsapp-bridge",
 		"servers/pihu-whatsapp-mcp/whatsapp-bridge",
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		candidates = append(candidates, filepath.Join(home, ".pihu", "whatsapp-bridge"))
+		candidates = append(candidates,
+			filepath.Join(home, "Documents", "projects", "pihu-os", "src-tauri", "pihu_mcps", "mcp", "servers", "pihu-whatsapp-mcp", "whatsapp-bridge"),
+			filepath.Join(home, ".pihu", "whatsapp-bridge"),
+		)
 	}
 	for _, dir := range candidates {
 		if stat, err := os.Stat(dir); err == nil && stat.IsDir() {
