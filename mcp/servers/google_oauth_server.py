@@ -2,15 +2,46 @@ import sys
 import os
 import json
 import ssl
+import base64
+import html
+import re
+from pathlib import Path
 import subprocess
 import urllib.parse
 import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
+def render_callback_page(success, user_name='', user_email=''):
+    resources = Path(__file__).resolve().parent
+    template = (resources / 'google_oauth_page.html').read_text(encoding='utf-8')
+    logo = base64.b64encode((resources / 'pihu-logo.png').read_bytes()).decode('ascii')
+    values = {
+        '__TITLE__': "You're connected." if success else "Connection incomplete.",
+        '__MESSAGE__': 'Your Google account has been linked to PIHU.' if success else 'Google could not complete the connection. Return to PIHU and try linking your account again.',
+        '__ACCOUNT_NAME__': html.escape(user_name),
+        '__ACCOUNT_EMAIL__': html.escape(user_email),
+        '__ACCOUNT_HIDDEN__': '' if success and (user_name or user_email) else 'hidden',
+        '__RETURN__': 'You can close this tab and return to PIHU.' if success else 'You can close this tab. Your existing connections remain unchanged.',
+        '__LOGO__': 'data:image/png;base64,' + logo,
+    }
+    # Substitute once so account text cannot introduce template tokens or HTML.
+    return re.sub(r'__[A-Z_]+__', lambda match: values.get(match.group(), ''), template)
+
+
 class OAuthCallbackHandler(BaseHTTPRequestHandler):
     client_id = ""
     client_secret = ""
     token_save_path = os.path.expanduser("~/.gemini/antigravity/google_workspace_tokens.json")
+
+    def send_callback_page(self, status, success, user_name='', user_email=''):
+        page = render_callback_page(success, user_name, user_email).encode('utf-8')
+        self.send_response(status)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Referrer-Policy', 'no-referrer')
+        self.send_header('Content-Length', str(len(page)))
+        self.end_headers()
+        self.wfile.write(page)
 
     def fetch_user_info(self, access_token):
         userinfo_url = "https://www.googleapis.com/oauth2/v2/userinfo"
@@ -80,10 +111,7 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
                     except Exception as e2:
                         err_msg = f"OAuth Token Exchange failed: {str(e2)}"
                         print(err_msg, file=sys.stderr)
-                        self.send_response(500)
-                        self.send_header("Content-type", "text/html")
-                        self.end_headers()
-                        self.wfile.write(f"<h3>OAuth Exchange Error</h3><p>{err_msg}</p>".encode("utf-8"))
+                        self.send_callback_page(500, False)
                         sys.exit(1)
 
                 if token_resp and ("access_token" in token_resp or "refresh_token" in token_resp):
@@ -134,49 +162,17 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
                     with open(OAuthCallbackHandler.token_save_path, "w") as f:
                         json.dump(full_token_storage, f, indent=2)
 
-                    avatar_html = f'<img src="{user_picture}" style="width: 64px; height: 64px; border-radius: 50%; margin: 0 auto 16px auto; border: 2px solid #ec4899;" />' if user_picture else f'<div style="width: 60px; height: 60px; background: linear-gradient(135deg, #ec4899, #8b5cf6); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px auto; font-size: 26px; color: #fff; font-weight: bold;">{user_name[0].upper()}</div>'
-
-                    html = f"""
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <title>PIHU OS - Account Linked</title>
-                        <meta charset="utf-8">
-                    </head>
-                    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f12; color: #fff; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0;">
-                        <div style="text-align: center; padding: 40px; background: #18181b; border: 1px solid #27272a; border-radius: 24px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); max-width: 440px;">
-                            {avatar_html}
-                            <h1 style="color: #ec4899; margin: 0 0 6px 0; font-size: 22px;">Account Linked Successfully!</h1>
-                            <p style="color: #ffffff; font-size: 16px; font-weight: 600; margin: 0 0 4px 0;">{user_name}</p>
-                            <p style="color: #a1a1aa; font-size: 14px; margin: 0 0 24px 0;">{user_email}</p>
-                            <div style="padding: 12px; background: rgba(236, 72, 153, 0.1); border: 1px solid rgba(236, 72, 153, 0.3); border-radius: 12px; font-size: 13px; color: #f472b6; margin-bottom: 24px;">
-                                Gmail, Calendar, Docs, Tasks, Keep & Drive Automation Active
-                            </div>
-                            <p style="color: #71717a; font-size: 12px; margin: 0;">You can close this tab and return to PIHU OS.</p>
-                        </div>
-                    </body>
-                    </html>
-                    """
-                    self.send_response(200)
-                    self.send_header("Content-type", "text/html")
-                    self.end_headers()
-                    self.wfile.write(html.encode("utf-8"))
+                    self.send_callback_page(200, True, user_name, user_email)
 
                     account_json = json.dumps({"email": user_email, "name": user_name, "picture": user_picture})
                     print(f"OAUTH_ACCOUNT_CONNECTED:{account_json}")
                     sys.stdout.flush()
                     sys.exit(0)
                 else:
-                    err_json = json.dumps(token_resp)
-                    self.send_response(400)
-                    self.send_header("Content-type", "text/html")
-                    self.end_headers()
-                    self.wfile.write(f"<h3>Google OAuth Error</h3><pre>{err_json}</pre>".encode("utf-8"))
+                    self.send_callback_page(400, False)
                     sys.exit(1)
             else:
-                self.send_response(400)
-                self.end_headers()
-                self.wfile.write(b"Missing code parameter")
+                self.send_callback_page(400, False)
         else:
             self.send_response(404)
             self.end_headers()
