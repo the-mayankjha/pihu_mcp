@@ -283,7 +283,7 @@ class GeminiProvider(LLMProvider):
                     if resp.status_code == 404:
                         raise ValueError(
                             f"Model '{target_model}' was not found (HTTP 404). "
-                            "Please choose a supported model using /model (e.g. gemini-2.0-flash)."
+                            "Please choose a supported model using /model (e.g. gemini-3.8-flash)."
                         )
 
                     if resp.status_code in [429, 403, 500, 503]:
@@ -341,7 +341,7 @@ class GeminiProvider(LLMProvider):
                 continue
 
         # 2. Sibling Model Fallback on 503 High Demand or 429 across all keys
-        fallback_models = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-pro-exp-02-05"]
+        fallback_models = ["gemini-3.8-flash", "gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-pro-exp-02-05"]
         for fb_model in fallback_models:
             if fb_model == target_model:
                 continue

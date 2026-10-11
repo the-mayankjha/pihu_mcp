@@ -22,6 +22,54 @@ type ModelItem struct {
 	SizeInfo string
 }
 
+type modelPreference struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+}
+
+func modelPreferencePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".pihu", "cli-model.json")
+}
+
+func loadModelPreference() modelPreference {
+	path := modelPreferencePath()
+	if path == "" {
+		return modelPreference{}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return modelPreference{}
+	}
+	var preference modelPreference
+	if json.Unmarshal(data, &preference) != nil {
+		return modelPreference{}
+	}
+	return preference
+}
+
+func saveModelPreference(provider, model string) error {
+	path := modelPreferencePath()
+	if path == "" {
+		return fmt.Errorf("could not locate the user config directory")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(modelPreference{Provider: provider, Model: model}, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
 // DiscoverGeminiKey finds the active Gemini API key from env or .env files.
 func DiscoverGeminiKey() string {
 	for _, envVar := range []string{
@@ -162,8 +210,8 @@ func FetchAvailableModels() []ModelItem {
 		models = append(models,
 			ModelItem{
 				Provider: "gemini",
-				Name:     "gemini-2.0-flash",
-				Tagline:  "Recommended · Fast, Multimodal, Real-Time",
+				Name:     "gemini-3.8-flash",
+				Tagline:  "Recommended · Gemini Flash 3.8",
 				IsLocal:  false,
 				SizeInfo: "Cloud",
 			},

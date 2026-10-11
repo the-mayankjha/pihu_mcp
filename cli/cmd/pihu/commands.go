@@ -9,11 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"pihu/cli/internal/render"
 	"pihu/cli/internal/ui"
+	"pihu/cli/internal/version"
 	"pihu/cli/internal/workspace"
 
 	"github.com/charmbracelet/lipgloss"
@@ -90,7 +92,7 @@ var mcpCmd = &cobra.Command{
 
 var mcpSearchCmd = &cobra.Command{
 	Use:   "search <query>",
-	Short: "Search PIHU MCP Registry (pihu.nfks.co.in/api/v1/mcp)",
+	Short: "Search the live PIHU MCP catalog",
 	Run: func(cmd *cobra.Command, args []string) {
 		q := ""
 		if len(args) > 0 {
@@ -98,11 +100,17 @@ var mcpSearchCmd = &cobra.Command{
 		}
 		fmt.Printf("%s Searching registry for '%s'...\n", lipgloss.NewStyle().Foreground(cmdYellow).Render("◈"), q)
 		fmt.Println(lipgloss.NewStyle().Foreground(cmdSurf1).Render(strings.Repeat("─", 70)))
-		fmt.Println("  ✓ google-workspace   (v1.2.0) - Gmail, Google Calendar, Drive, Docs & Sheets")
-		fmt.Println("  ✓ sqlite             (v1.0.0) - Query and introspect local SQLite databases")
-		fmt.Println("  ✓ github             (v1.1.0) - Create PRs, issues, commits and search repository")
-		fmt.Println("  ✓ docker             (v1.0.1) - Container inspection, logs and local docker runner")
-		fmt.Println("  ✓ slack              (v1.0.0) - Post messages, search channels and monitor threads")
+		items, message := ui.SearchLiveMCP(q)
+		if message != "" {
+			fmt.Println(lipgloss.NewStyle().Foreground(cmdYellow).Render("  " + message))
+		}
+		if len(items) == 0 {
+			fmt.Println("  No matching MCP packages.")
+			return
+		}
+		for _, item := range items {
+			fmt.Printf("  %s  (%s) · %s · %s\n", lipgloss.NewStyle().Foreground(cmdGreen).Render(item.ID), item.Version, item.Category, item.Description)
+		}
 	},
 }
 
@@ -112,15 +120,37 @@ var mcpInfoCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		mcpID := args[0]
+		item, err := ui.LiveMCPInfo(mcpID)
+		if err != nil {
+			fmt.Fprintln(cmd.ErrOrStderr(), err)
+			return
+		}
 		fmt.Println(ui.RenderAsciiArt())
 		fmt.Println()
-		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(cmdMauve).Render("Package Info: " + mcpID))
+		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(cmdMauve).Render("Package Info: " + item.DisplayName))
 		fmt.Println(lipgloss.NewStyle().Foreground(cmdSurf1).Render(strings.Repeat("─", 70)))
-		fmt.Println("  ID:           " + mcpID)
-		fmt.Println("  Runtime:      python (uv virtualenv)")
-		fmt.Println("  Transport:    stdio")
-		fmt.Println("  Permissions:  network access required")
-		fmt.Println("  Location:     ~/.pihu/mcp/servers/" + mcpID)
+		fmt.Println("  ID:           " + item.ID)
+		fmt.Println("  Version:      " + item.Version)
+		fmt.Println("  Author:       " + item.Author)
+		fmt.Println("  Category:     " + item.Category)
+		fmt.Println("  Runtime:      " + item.Runtime)
+		fmt.Println("  Transport:    " + item.Transport)
+		fmt.Println("  Description:  " + item.Description)
+		if item.Repository != "" {
+			fmt.Println("  Repository:   " + item.Repository)
+		}
+		if len(item.Prereqs) > 0 {
+			fmt.Println("  Requirements: " + strings.Join(item.Prereqs, ", "))
+		}
+		fmt.Println("  Install:      " + item.InstallCmd)
+		fmt.Println("  Tools:")
+		for _, tool := range item.Tools {
+			fmt.Printf("    • %s", tool.Name)
+			if tool.Description != "" {
+				fmt.Printf(" — %s", tool.Description)
+			}
+			fmt.Println()
+		}
 	},
 }
 
@@ -190,7 +220,7 @@ var mcpRefreshCmd = &cobra.Command{
 	Short: "Reload installed MCP configurations and restart active sessions",
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println("  ✓ Reloaded ~/.pihu/mcp/installed.json")
-		fmt.Println("  ✓ Discovered 53 tools from active MCP sessions.")
+		fmt.Println("  Run 'pihu mcp tools' to list tools currently exposed by active servers.")
 	},
 }
 
@@ -1001,10 +1031,23 @@ var versionCmd = &cobra.Command{
 		label := lipgloss.NewStyle().Foreground(cmdMuted).Width(20)
 		val := lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
 
-		fmt.Printf("  %s %s\n", label.Render("PIHU OS Version:"), vStyle.Render("v1.0.0"))
-		fmt.Printf("  %s %s\n", label.Render("CLI Runtime:"), val.Render("Go 1.26 + Cobra + Bubble Tea + Lipgloss + Glamour"))
+		fmt.Printf("  %s %s\n", label.Render("PIHU CLI Version:"), vStyle.Render("v"+version.Version))
+		fmt.Printf("  %s %s\n", label.Render("CLI Runtime:"), val.Render(runtime.Version()+" + Cobra + Bubble Tea + Lipgloss + Glamour"))
 		fmt.Printf("  %s %s\n", label.Render("Agent Core:"), val.Render("Python 3.10+ / Hatchling"))
-		fmt.Printf("  %s %s\n", label.Render("MCP Protocol:"), val.Render("JSON-RPC 2.0  (53 Tools Active)"))
+		installed := ui.GetInstalledMCPs(nil)
+		activeCount, toolCount := 0, 0
+		for _, item := range installed {
+			if item.Enabled {
+				activeCount++
+				toolCount += item.ToolCount
+			}
+		}
+		mcpStatus := fmt.Sprintf("JSON-RPC 2.0  (%d active MCPs", activeCount)
+		if toolCount > 0 {
+			mcpStatus += fmt.Sprintf(", %d tools", toolCount)
+		}
+		mcpStatus += ")"
+		fmt.Printf("  %s %s\n", label.Render("MCP Protocol:"), val.Render(mcpStatus))
 		fmt.Printf("  %s %s\n", label.Render("LLM Support:"), val.Render("Google Gemini 2.0 Flash + Local Ollama"))
 		fmt.Printf("  %s %s\n", label.Render("Output:"), val.Render("glamour v1.0 · chroma v2.27 · syntax highlighting · diffs · trees"))
 		fmt.Println()

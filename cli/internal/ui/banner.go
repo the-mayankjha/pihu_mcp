@@ -8,12 +8,14 @@ import (
 )
 
 const AsciiLogo = `
+
   ██████╗ ██╗██╗  ██╗██╗   ██╗
   ██╔══██╗██║██║  ██║██║   ██║
   ██████╔╝██║███████║██║   ██║
   ██╔═══╝ ██║██╔══██║██║   ██║
   ██║     ██║██║  ██║╚██████╔╝
-  ╚═╝     ╚═╝╚═╝  ╚═╝ ╚═════╝ `
+  ╚═╝     ╚═╝╚═╝  ╚═╝ ╚═════╝ 
+`
 
 var (
 	// Gradient colors for ASCII art lines
@@ -58,18 +60,11 @@ func RenderBanner(provider, model string, serverCount, toolCount int, workspace 
 	}
 	if model == "" {
 		if provider == "gemini" {
-			model = "gemini-2.0-flash"
+			model = "gemini-3.8-flash"
 		} else {
 			model = "qwen3:4b"
 		}
 	}
-	if serverCount == 0 {
-		serverCount = 5
-	}
-	if toolCount == 0 {
-		toolCount = 53
-	}
-
 	info := fmt.Sprintf(
 		"  %s %s (%s)  │  %s %s (%s)  │  %s %s",
 		metaStyle.Render("Engine:"),

@@ -44,8 +44,28 @@ def refresh_access_token():
             headers={"Content-Type": "application/json", "Accept": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(request, context=ssl.create_default_context(), timeout=20) as response:
-            token_response = json.loads(response.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(request, context=ssl.create_default_context(), timeout=20) as response:
+                token_response = json.loads(response.read().decode("utf-8"))
+        except Exception:
+            # If the hosted broker is down, refresh fallback credentials directly
+            # with Google using the OAuth client already configured on this device.
+            client_id = data.get("client_id")
+            client_secret = data.get("client_secret")
+            if not client_id or not client_secret:
+                raise
+            form = urllib.parse.urlencode({
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            }).encode("ascii")
+            local_request = urllib.request.Request(
+                "https://oauth2.googleapis.com/token", data=form,
+                headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+            )
+            with urllib.request.urlopen(local_request, context=ssl.create_default_context(), timeout=20) as response:
+                token_response = json.loads(response.read().decode("utf-8"))
         new_access_token = token_response.get("access_token")
         if not new_access_token:
             return None

@@ -20,7 +20,7 @@ var SlashCommands = []CommandSuggestion{
 		Command: "/model",
 		Syntax:  "/model [name]",
 		Desc:    "Switch active LLM model (Gemini Cloud or Ollama Local)",
-		Args:    []string{"gemini-2.0-flash", "gemini-2.5-flash", "gemini-3.7-flash", "qwen3:4b", "gemma3:4b"},
+		Args:    []string{"gemini-3.8-flash", "gemini-2.5-flash", "gemini-3.7-flash", "qwen3:4b", "gemma3:4b"},
 	},
 	{
 		Command: "/key",
