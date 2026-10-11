@@ -47,6 +47,8 @@ class NodeMCPRuntimeHandler(BaseMCPRuntimeHandler):
                 entrypoint = (target_dir / relative).resolve()
                 if not entrypoint.is_relative_to(target_dir.resolve()) or not entrypoint.is_file():
                     raise RuntimeError("The installed MCP entrypoint was not found.")
+            if manifest.id == "browser-mcp":
+                await self._run(npm, "exec", "--yes", "--", "playwright", "install", "chromium", cwd=target_dir)
 
         args = list(manifest.entrypoint.args)
         if entrypoint:
