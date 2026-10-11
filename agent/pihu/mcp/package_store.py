@@ -28,8 +28,16 @@ class PackageStore:
                 if not isinstance(payload, dict):
                     continue
                 state.update({k: v for k, v in payload.items() if k not in ("packages", "servers")})
-                state["packages"].update(payload.get("packages", {}))
-                state["servers"].update(payload.get("servers", {}))
+                packages = payload.get("packages", {})
+                servers = payload.get("servers", {})
+                if isinstance(packages, dict):
+                    state["packages"].update(
+                        {key: value for key, value in packages.items() if isinstance(value, dict)}
+                    )
+                if isinstance(servers, dict):
+                    state["servers"].update(
+                        {key: value for key, value in servers.items() if isinstance(value, dict)}
+                    )
             except (OSError, json.JSONDecodeError, TypeError):
                 continue
         for package_id, record in state["servers"].items():
@@ -40,8 +48,10 @@ class PackageStore:
     def write(self, state: Dict[str, Any]) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         state["schema_version"] = 1
-        state.setdefault("packages", {})
-        state.setdefault("servers", {})
+        if not isinstance(state.get("packages"), dict):
+            state["packages"] = {}
+        if not isinstance(state.get("servers"), dict):
+            state["servers"] = {}
         fd, temp_name = tempfile.mkstemp(prefix="installed.", suffix=".tmp", dir=self.data_dir)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
