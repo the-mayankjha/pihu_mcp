@@ -137,7 +137,7 @@
         "repository": "https://github.com/the-mayankjha/pihu_mcp",
         "entrypoint": "mcp/servers/pihu_file_mcp.py"
       },
-      "connection": "unavailable",
+      "connection": "available",
       "status": "active",
       "verified": false,
       "name": "pihu-file-mcp"
@@ -208,7 +208,7 @@
         "repository": "https://github.com/the-mayankjha/pihu_mcp",
         "entrypoint": "mcp/servers/pihu_system_mcp.py"
       },
-      "connection": "unavailable",
+      "connection": "available",
       "status": "active",
       "verified": false,
       "name": "pihu-system-mcp"
@@ -275,7 +275,7 @@
         "repository": "https://github.com/the-mayankjha/pihu_mcp",
         "entrypoint": "mcp/servers/pihu-web-search-mcp/web_search_mcp/server.py"
       },
-      "connection": "unavailable",
+      "connection": "available",
       "status": "active",
       "verified": false,
       "name": "pihu-web-search-mcp"
@@ -342,7 +342,7 @@
         "repository": "https://github.com/the-mayankjha/pihu_mcp",
         "entrypoint": "mcp/servers/pihu_project_mcp.js"
       },
-      "connection": "unavailable",
+      "connection": "available",
       "status": "active",
       "verified": false,
       "name": "pihu-project-mcp"
@@ -426,7 +426,7 @@
         "repository": "https://github.com/the-mayankjha/pihu_mcp",
         "entrypoint": "mcp/servers/google.py"
       },
-      "connection": "unavailable",
+      "connection": "available",
       "status": "active",
       "verified": false,
       "name": "google-workspace-mcp"
@@ -497,7 +497,7 @@
         "repository": "https://github.com/the-mayankjha/pihu_mcp",
         "entrypoint": "mcp/servers/pihu_whatsapp_mcp.py"
       },
-      "connection": "unavailable",
+      "connection": "available",
       "status": "active",
       "verified": false,
       "name": "pihu-whatsapp-mcp"
@@ -568,7 +568,7 @@
         "repository": "https://github.com/the-mayankjha/pihu_mcp",
         "entrypoint": "mcp/servers/pihu_github_mcp.py"
       },
-      "connection": "unavailable",
+      "connection": "available",
       "status": "active",
       "verified": false,
       "name": "github-mcp"
@@ -631,7 +631,7 @@
         "repository": "https://github.com/the-mayankjha/pihu_mcp",
         "entrypoint": "mcp/servers/pihu_spotify_mcp.py"
       },
-      "connection": "unavailable",
+      "connection": "available",
       "status": "active",
       "verified": false,
       "name": "spotify-mcp"
