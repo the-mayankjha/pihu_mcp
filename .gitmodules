@@ -1,0 +1,4 @@
+[submodule "mcp/servers/pihu-whatsapp-mcp"]
+	path = mcp/servers/pihu-whatsapp-mcp
+	url = https://github.com/the-mayankjha/pihu-whatsapp-mcp.git
+	branch = main
