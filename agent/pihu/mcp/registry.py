@@ -9,7 +9,10 @@ import urllib.parse
 from typing import Dict, Any, List, Optional
 from pihu.mcp.manifest import MCPPackageManifest
 
-DEFAULT_REGISTRY_URL = os.getenv("PIHU_MCP_REGISTRY_URL", "https://pihu.nfks.co.in/api/v1/mcp")
+DEFAULT_REGISTRY_URL = os.getenv(
+    "PIHU_MARKET_REGISTRY_URL",
+    os.getenv("PIHU_MCP_REGISTRY_URL", "https://pihu.nfks.co.in/api/v2"),
+)
 
 
 class MCPRegistryClient:
@@ -18,6 +21,23 @@ class MCPRegistryClient:
     def __init__(self, base_url: str = DEFAULT_REGISTRY_URL, timeout: float = 10.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        legacy_url = os.getenv("PIHU_MCP_REGISTRY_URL")
+        self.legacy_base_url = (legacy_url or self.base_url.replace("/api/v2", "/api/v1/mcp")).rstrip("/")
+
+    def _get_json(self, paths: List[str]) -> Optional[Dict[str, Any]]:
+        """Try v2 first, then the legacy v1 route while deployments are upgraded."""
+        for path in paths:
+            for base_url in dict.fromkeys((self.base_url, self.legacy_base_url)):
+                try:
+                    req = urllib.request.Request(f"{base_url}{path}", headers={"User-Agent": "PIHU-Market-Client/2.0"})
+                    with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                        if resp.status == 200:
+                            data = json.loads(resp.read().decode("utf-8"))
+                            if isinstance(data, dict):
+                                return data
+                except Exception:
+                    continue
+        return None
 
     async def search(self, query: str = "", category: Optional[str] = None) -> List[Dict[str, Any]]:
         """Search the remote registry for packages matching a query or category."""
@@ -27,46 +47,37 @@ class MCPRegistryClient:
         if category:
             params["category"] = category
 
-        url = f"{self.base_url}/search"
+        url = "/search"
         if params:
-            url += "?" + urllib.parse.urlencode(params)
-
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "PIHU-MCP-Installer/1.0"})
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                if resp.status == 200:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    return data.get("results", [])
-        except Exception:
-            pass
+            url += "?" + urllib.parse.urlencode({**params, "type": "mcp"})
+        data = self._get_json([url])
+        if data:
+            return data.get("results", data.get("packages", []))
 
         # Built-in fallback search index when offline or registry unreachable
         return self._builtin_fallback_search(query)
 
     async def get_package_info(self, mcp_id: str) -> Optional[Dict[str, Any]]:
         """Fetch package metadata for a specific package ID."""
-        url = f"{self.base_url}/packages/{mcp_id}"
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "PIHU-MCP-Installer/1.0"})
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                if resp.status == 200:
-                    return json.loads(resp.read().decode("utf-8"))
-        except Exception:
-            pass
+        encoded_id = urllib.parse.quote(mcp_id, safe="")
+        data = self._get_json([f"/packages/{encoded_id}", f"/servers/{encoded_id}"])
+        if data:
+            return data
 
         return self._builtin_package_info(mcp_id)
 
     async def fetch_manifest(self, mcp_id: str, version: str = "latest") -> MCPPackageManifest:
         """Retrieve and parse the MCPPackageManifest for a package ID and version."""
-        url = f"{self.base_url}/packages/{mcp_id}/versions/{version}"
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "PIHU-MCP-Installer/1.0"})
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                if resp.status == 200:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    return MCPPackageManifest.from_dict(data)
-        except Exception:
-            pass
+        encoded_id = urllib.parse.quote(mcp_id, safe="")
+        encoded_version = urllib.parse.quote(version, safe="")
+        paths = ([f"/packages/{encoded_id}/manifest", f"/servers/{encoded_id}/manifest"]
+                 if version in ("latest", "*") else
+                 [f"/packages/{encoded_id}/versions/{encoded_version}", f"/servers/{encoded_id}/versions/{encoded_version}"])
+        data = self._get_json(paths)
+        if data:
+            manifest = data.get("manifest", data)
+            if isinstance(manifest, dict) and manifest.get("type", "mcp") == "mcp":
+                return MCPPackageManifest.from_dict(manifest)
 
         # Fallback to local manifest builder
         info = self._builtin_package_info(mcp_id)
