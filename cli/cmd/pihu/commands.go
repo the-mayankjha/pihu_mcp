@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -64,60 +65,13 @@ var runCmd = &cobra.Command{
 
 var toolsCmd = &cobra.Command{
 	Use:   "tools",
-	Short: "List all 53 available Model Context Protocol (MCP) tools",
+	Short: "List tools exposed by built-in and installed MCP servers",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println(ui.RenderAsciiArt())
-		fmt.Println()
-
-		cwd, _ := os.Getwd()
-		ws := workspace.Detect(findProjectRoot(cwd))
-
-		header := lipgloss.NewStyle().Bold(true).Foreground(cmdMauve).
-			Render("Model Context Protocol — Active Tool Catalog (53 Executable Tools)")
-		fmt.Println(header)
-		fmt.Println(lipgloss.NewStyle().Foreground(cmdSurf1).Render(strings.Repeat("─", 75)))
-		fmt.Println()
-
-		if ws.Language != "" || ws.Framework != "" {
-			lbl := lipgloss.NewStyle().Foreground(cmdMuted).Render("Workspace:  ")
-			val := lipgloss.NewStyle().Foreground(cmdSubtext).Render(ws.Summary())
-			fmt.Println("  " + lbl + val)
-			fmt.Println()
+		bridgeArgs := []string{"tools"}
+		if jsonFlag {
+			bridgeArgs = append(bridgeArgs, "--json")
 		}
-
-		categories := []struct {
-			Server string
-			Color  lipgloss.Color
-			Icon   string
-			Count  int
-			Desc   string
-			Tools  []string
-		}{
-			{"pihu-file-mcp", cmdMauve, "◈", 24,
-				"High-performance local filesystem engine with search, diff, patch & tree",
-				[]string{"read_file", "write_file", "write_batch_files", "search_files", "explore_directory", "tree", "grep_search", "replace_text", "copy_file", "move_file", "trash_file", "stat_file"}},
-			{"pihu-system-mcp", cmdGreen, "◇", 7,
-				"Host hardware telemetry, process manager, and native shell execution",
-				[]string{"get_system_info", "get_system_status", "get_system_snapshot", "run_shell", "list_processes", "get_current_time", "send_notification"}},
-			{"pihu-web-search-mcp", cmdSapph, "›", 6,
-				"Real-time search engine with DuckDuckGo, Brave, web fetcher & scraper",
-				[]string{"web_search", "web_fetch", "web_search_and_read", "web_download_file", "web_search_and_download", "web_capabilities"}},
-			{"google-workspace-mcp", cmdYellow, "§", 10,
-				"Google Workspace integration (Gmail, Calendar, Drive, Docs, Tasks)",
-				[]string{"gmail_search", "gmail_check_unread", "gmail_send", "gmail_get_message", "calendar_list", "calendar_create_event", "tasks_list_tasks", "tasks_create_task", "docs_create", "drive_search"}},
-			{"pihu-project-mcp", cmdPeach, "▲", 6,
-				"Multi-stack project scaffolder, test runner, server manager & diagnostics",
-				[]string{"pihu_scaffold_project", "pihu_test_project", "pihu_diagnose_and_fix", "pihu_manage_server", "pihu_run_and_open_web", "pihu_health_check"}},
-		}
-
-		for _, cat := range categories {
-			title := lipgloss.NewStyle().Foreground(cat.Color).Bold(true).
-				Render(fmt.Sprintf("%s %s (%d tools)", cat.Icon, cat.Server, cat.Count))
-			desc := lipgloss.NewStyle().Foreground(cmdSubtext).Render(cat.Desc)
-			toolsList := lipgloss.NewStyle().Foreground(cmdMuted).Render("   " + strings.Join(cat.Tools, "  •  "))
-			fmt.Printf("\n%s\n  %s\n%s\n", title, desc, toolsList)
-		}
-		fmt.Println()
+		runMCPRuntimeOrExit(bridgeArgs...)
 	},
 }
 
@@ -175,21 +129,7 @@ var mcpInstallCmd = &cobra.Command{
 	Short: "Install an MCP package natively into isolated ~/.pihu/mcp/ environment",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		spec := args[0]
-		fmt.Printf("%s Installing MCP '%s' into ~/.pihu/mcp/servers/%s...\n\n", lipgloss.NewStyle().Foreground(cmdGreen).Bold(true).Render("==>"), spec, spec)
-		steps := []string{
-			"Fetching manifest from registry",
-			"Validating package manifest & schema",
-			"Creating isolated runtime environment (uv / npm)",
-			"Installing dependencies",
-			"Registering in ~/.pihu/mcp/installed.json",
-			"Running health probe & discovering tools",
-		}
-		for _, s := range steps {
-			fmt.Printf("  %s %s\n", lipgloss.NewStyle().Foreground(cmdGreen).Render("✓"), s)
-		}
-		fmt.Println()
-		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(cmdGreen).Render(fmt.Sprintf("%s Installed %s successfully!", "✔", spec)))
+		runMCPRuntimeOrExit("install", args[0])
 	},
 }
 
@@ -197,34 +137,11 @@ var mcpListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all locally installed MCP packages in ~/.pihu/mcp/installed.json",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println(ui.RenderAsciiArt())
-		fmt.Println()
-		title := lipgloss.NewStyle().Bold(true).Foreground(cmdGreen).
-			Render("● Installed MCP Servers (~/.pihu/mcp/installed.json)")
-		fmt.Println(title)
-		fmt.Println(lipgloss.NewStyle().Foreground(cmdSurf1).Render(strings.Repeat("─", 70)))
-
-		servers := []struct {
-			Name    string
-			Runtime string
-			Status  string
-			Tools   int
-		}{
-			{"pihu-file-mcp", "python (uv)", "enabled", 24},
-			{"pihu-system-mcp", "python (uv)", "enabled", 7},
-			{"pihu-web-search-mcp", "python (uv)", "enabled", 6},
-			{"google-workspace", "python (uv)", "enabled", 10},
-			{"pihu-project-mcp", "node (npm)", "enabled", 6},
+		runtimeArgs := []string{"list"}
+		if jsonFlag {
+			runtimeArgs = append(runtimeArgs, "--json")
 		}
-
-		for _, s := range servers {
-			dot := lipgloss.NewStyle().Foreground(cmdGreen).Render("✓")
-			name := lipgloss.NewStyle().Foreground(cmdMauve).Bold(true).Width(25).Render(s.Name)
-			rt := lipgloss.NewStyle().Foreground(cmdMuted).Width(18).Render(s.Runtime)
-			tools := lipgloss.NewStyle().Foreground(cmdBlue).Render(fmt.Sprintf("%2d tools", s.Tools))
-			fmt.Printf("  %s  %s %s  %s\n", dot, name, rt, tools)
-		}
-		fmt.Println()
+		runMCPRuntimeOrExit(runtimeArgs...)
 	},
 }
 
@@ -233,11 +150,7 @@ var mcpRemoveCmd = &cobra.Command{
 	Short: "Remove an installed MCP server package and cleanup its environment",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		mcpID := args[0]
-		fmt.Printf("%s Removing MCP '%s' from ~/.pihu/mcp/...\n", lipgloss.NewStyle().Foreground(cmdPeach).Render("==>"), mcpID)
-		fmt.Println("  ✓ Unregistered from installed.json")
-		fmt.Println("  ✓ Server directory removed")
-		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(cmdGreen).Render("✔ Package removed successfully."))
+		runMCPRuntimeOrExit("remove", args[0])
 	},
 }
 
@@ -1102,4 +1015,97 @@ var versionCmd = &cobra.Command{
 			fmt.Println(r.WorkspaceCard(ws.Name, ws.Language, ws.Framework, ws.PackageMgr, ws.GitBranch, ws.GitDirty, ws.FileCount))
 		}
 	},
+}
+
+var mcpToolsCmd = &cobra.Command{
+	Use:   "tools",
+	Short: "Discover tools from installed MCP servers",
+	Run: func(cmd *cobra.Command, args []string) {
+		bridgeArgs := []string{"tools"}
+		if jsonFlag {
+			bridgeArgs = append(bridgeArgs, "--json")
+		}
+		runMCPRuntimeOrExit(bridgeArgs...)
+	},
+}
+
+var mcpCallCmd = &cobra.Command{
+	Use:   "call <server_id> <tool_name> <arguments_json>",
+	Short: "Call a tool exposed by an installed MCP server",
+	Args:  cobra.ExactArgs(3),
+	Run: func(cmd *cobra.Command, args []string) {
+		runMCPRuntimeOrExit("call", args[0], args[1], args[2])
+	},
+}
+
+func runMCPRuntimeOrExit(args ...string) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Could not determine the home directory:", err)
+		os.Exit(1)
+	}
+	pythonCandidates := []string{
+		filepath.Join(home, ".pihu", ".venv", "bin", "python"),
+		filepath.Join(home, ".pihu", ".venv", "Scripts", "python.exe"),
+		filepath.Join(home, ".pihu-os", "venv", "bin", "python"),
+		"python3",
+		"python",
+	}
+	python := ""
+	for _, candidate := range pythonCandidates {
+		if filepath.IsAbs(candidate) {
+			if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+				python = candidate
+				break
+			}
+			continue
+		}
+		if resolved, lookErr := exec.LookPath(candidate); lookErr == nil {
+			python = resolved
+			break
+		}
+	}
+	if python == "" {
+		fmt.Fprintln(os.Stderr, "Python 3.10+ is required. Run PIHU setup and retry.")
+		os.Exit(1)
+	}
+
+	agentCandidates := []string{
+		filepath.Join(home, ".pihu", "agent"),
+		filepath.Join(home, ".pihu-os", "agent"),
+	}
+	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+		agentCandidates = append(agentCandidates, filepath.Join(cwd, "src-tauri", "pihu_mcps", "agent"), filepath.Join(cwd, "agent"))
+	}
+	agentDir := ""
+	for _, candidate := range agentCandidates {
+		if info, statErr := os.Stat(filepath.Join(candidate, "pihu", "mcp", "cli.py")); statErr == nil && !info.IsDir() {
+			agentDir = candidate
+			break
+		}
+	}
+	if agentDir == "" {
+		fmt.Fprintln(os.Stderr, "PIHU MCP runtime files are missing. Re-run PIHU setup before installing packages.")
+		os.Exit(1)
+	}
+
+	commandArgs := append([]string{"-m", "pihu.mcp.cli"}, args...)
+	command := exec.Command(python, commandArgs...)
+	command.Stdin = os.Stdin
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+	env := os.Environ()
+	pathValue := agentDir
+	if existing := os.Getenv("PYTHONPATH"); existing != "" {
+		pathValue += string(os.PathListSeparator) + existing
+	}
+	command.Env = append(env, "PYTHONPATH="+pathValue)
+	if err := command.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			os.Exit(exitErr.ExitCode())
+		}
+		fmt.Fprintln(os.Stderr, "Could not run the PIHU MCP runtime:", err)
+		os.Exit(1)
+	}
 }

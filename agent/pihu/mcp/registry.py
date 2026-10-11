@@ -13,6 +13,10 @@ DEFAULT_REGISTRY_URL = os.getenv(
     "PIHU_MARKET_REGISTRY_URL",
     os.getenv("PIHU_MCP_REGISTRY_URL", "https://pihu.nfks.co.in/api/v2"),
 )
+OFFICIAL_CATALOG_URL = os.getenv(
+    "PIHU_MCP_CATALOG_URL",
+    "https://raw.githubusercontent.com/the-mayankjha/pihu_mcp/pihu_market/market/catalog.json",
+)
 
 
 class MCPRegistryClient:
@@ -83,6 +87,19 @@ class MCPRegistryClient:
         info = self._builtin_package_info(mcp_id)
         if info:
             return MCPPackageManifest.from_dict(info)
+
+        # The signed-official source catalog is also the install source of truth;
+        # the API database may lag the repository catalog during publishing.
+        try:
+            req = urllib.request.Request(OFFICIAL_CATALOG_URL, headers={"User-Agent": "PIHU-Market-Client/2.0"})
+            with urllib.request.urlopen(req, timeout=self.timeout) as response:
+                catalog = json.loads(response.read().decode("utf-8"))
+            packages = catalog.get("packages", []) if isinstance(catalog, dict) else []
+            package = next((item for item in packages if isinstance(item, dict) and item.get("id") == mcp_id), None)
+            if package:
+                return MCPPackageManifest.from_dict(package)
+        except Exception:
+            pass
 
         raise ValueError(f"Package '{mcp_id}' not found in registry ({self.base_url}).")
 

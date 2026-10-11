@@ -13,6 +13,9 @@ from pihu.events.types import AgentEvent, EventType
 
 def resolve_mcp_servers_dir() -> Path:
     """Find the directory containing built-in MCP server scripts."""
+    configured = os.getenv("PIHU_MCP_SERVERS_DIR")
+    if configured and (Path(configured) / "pihu_file_mcp.py").exists():
+        return Path(configured)
     candidates = [
         Path(__file__).resolve().parent / "servers",
         Path(__file__).resolve().parent.parent.parent.parent / "mcp" / "servers",

@@ -8,6 +8,7 @@ import shutil
 import hashlib
 import json
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
 
@@ -43,7 +44,7 @@ class MCPInstaller:
         2. Validate manifest schema
         3. Create temporary sandbox directory
         4. Execute runtime installer (uv / npm)
-        5. Verify checksum (if declared)
+        5. Verify declared package metadata
         6. Probe server health & discover tools
         7. Atomic commit to ~/.pihu/mcp/installed.json
         8. Rollback sandbox if any step fails
@@ -79,11 +80,8 @@ class MCPInstaller:
             handler = self._get_runtime_handler(manifest.runtime)
             exec_params = await handler.install(manifest, temp_dir)
 
-            # Step 4: Verify SHA256 Checksum if provided
             if manifest.installation.checksum_sha256:
-                _log("Verifying artifact SHA-256 checksum...")
-                # Verify package directory checksum
-                pass
+                raise RuntimeError("This source installer cannot verify a package checksum; the package was not installed.")
 
             # Step 5: Save manifest into server folder
             (temp_dir / "manifest.json").write_text(json.dumps(manifest.to_dict(), indent=2))
@@ -97,9 +95,11 @@ class MCPInstaller:
                 env = exec_params.get("env", os.environ.copy())
 
                 healthy, probe_tools, probe_msg = await MCPHealthProbe.probe_stdio_server(command, args, env)
-                if healthy and probe_tools:
+                if not healthy:
+                    raise RuntimeError(f"MCP health check failed: {probe_msg}")
+                if probe_tools:
                     tools_discovered = probe_tools
-                    _log(f"Health check passed! {len(tools_discovered)} tools discovered.")
+                _log(f"Health check passed! {len(tools_discovered)} tools discovered.")
 
             # Step 7: Atomic Commit (Move temp_dir to the shared package directory).
             _log("Registering MCP in the shared PIHU package inventory...")
@@ -119,8 +119,13 @@ class MCPInstaller:
                 "env": exec_params.get("env", {}),
                 "endpoint": exec_params.get("endpoint"),
                 "tools": tools_discovered,
-                "installed_at": str(asyncio.get_event_loop().time()),
+                "installed_at": datetime.now(timezone.utc).isoformat(),
                 "install_path": str(target_dir),
+                "display_name": manifest.display_name or manifest.name,
+                "description": manifest.description,
+                "author": manifest.author,
+                "tool_definitions": manifest.tool_definitions,
+                "manifest": manifest.to_dict(),
             }
 
             self.package_store.record(server_record, "mcp")

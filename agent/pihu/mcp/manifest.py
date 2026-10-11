@@ -35,6 +35,7 @@ class MCPInstallationSpec:
     url: Optional[str] = None
     checksum_sha256: Optional[str] = None
     entrypoint: Optional[str] = None
+    dependencies: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -78,6 +79,7 @@ class MCPPackageManifest:
     permissions: MCPPermissions = field(default_factory=MCPPermissions)
     endpoint: Optional[str] = None
     tools_provided: List[str] = field(default_factory=list)
+    tool_definitions: List[Dict[str, Any]] = field(default_factory=list)
     display_name: Optional[str] = None
     artifacts: List[Dict[str, Any]] = field(default_factory=list)
     compatibility: Dict[str, Any] = field(default_factory=dict)
@@ -95,6 +97,7 @@ class MCPPackageManifest:
                 url=inst_data.get("url", inst_data.get("repository")),
                 checksum_sha256=inst_data.get("checksum_sha256"),
                 entrypoint=inst_data.get("entrypoint"),
+                dependencies=inst_data.get("dependencies", []) if isinstance(inst_data.get("dependencies", []), list) else [],
             )
         else:
             inst = MCPInstallationSpec()
@@ -150,6 +153,7 @@ class MCPPackageManifest:
             permissions=perm,
             endpoint=data.get("endpoint"),
             tools_provided=[tool for tool in tools if tool],
+            tool_definitions=[tool for tool in tools_data if isinstance(tool, dict) and isinstance(tool.get("name"), str)],
             display_name=data.get("display_name"),
             artifacts=artifacts if isinstance(artifacts, list) else [],
             compatibility=data.get("compatibility", {}) if isinstance(data.get("compatibility", {}), dict) else {},

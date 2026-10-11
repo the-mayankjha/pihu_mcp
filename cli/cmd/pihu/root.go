@@ -60,6 +60,7 @@ func init() {
 	mcpCmd.AddCommand(mcpUpdateCmd)
 	mcpCmd.AddCommand(mcpDoctorCmd)
 	mcpCmd.AddCommand(mcpRefreshCmd)
+	mcpCmd.AddCommand(mcpToolsCmd, mcpCallCmd)
 
 	mcpWhatsappCmd.AddCommand(mcpWhatsappAuthCmd)
 	mcpWhatsappCmd.AddCommand(mcpWhatsappStatusCmd)

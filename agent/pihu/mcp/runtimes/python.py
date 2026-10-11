@@ -1,76 +1,54 @@
-"""
-Python MCP Runtime Handler using uv venv & uv pip for isolated virtual environments.
-"""
+"""Install Python MCP packages into an isolated environment."""
 
-import os
-import sys
-import shutil
 import asyncio
+import sys
 from pathlib import Path
 from typing import Dict, Any
+
 from pihu.mcp.manifest import MCPPackageManifest
 from pihu.mcp.runtimes.base import BaseMCPRuntimeHandler
+from pihu.mcp.runtimes.source import clone_source, resolve_entrypoint
 
 
 class PythonMCPRuntimeHandler(BaseMCPRuntimeHandler):
-    """Manages Python MCP virtualenv creation via `uv venv` and dependency installation via `uv pip`."""
+    async def _run(self, *args: str, cwd: Path | None = None) -> None:
+        proc = await asyncio.create_subprocess_exec(
+            *args, cwd=str(cwd) if cwd else None,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            detail = stderr.decode(errors="replace").strip() or stdout.decode(errors="replace").strip()
+            raise RuntimeError(detail or f"Command failed: {args[0]}")
 
     async def install(self, manifest: MCPPackageManifest, target_dir: Path) -> Dict[str, Any]:
         venv_dir = target_dir / ".venv"
-        py_binary = venv_dir / "bin" / "python"
-        if sys.platform == "win32":
-            py_binary = venv_dir / "Scripts" / "python.exe"
+        py_binary = venv_dir / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+        await self._run(sys.executable, "-m", "venv", str(venv_dir))
 
-        uv_cmd = shutil.which("uv")
+        source_dir: Path | None = None
+        entrypoint: Path | None = None
+        if manifest.installation.method == "git" or manifest.installation.entrypoint:
+            source_dir = await clone_source(manifest, target_dir)
+            entrypoint = resolve_entrypoint(source_dir, manifest)
 
-        # Step 1: Create virtualenv via `uv venv` (or standard venv fallback)
-        if uv_cmd:
-            proc = await asyncio.create_subprocess_exec(
-                uv_cmd, "venv", str(venv_dir),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            _, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                raise RuntimeError(f"Failed to create uv venv: {stderr.decode()}")
+        dependencies = list(manifest.installation.dependencies)
+        if manifest.installation.package:
+            dependencies.append(manifest.installation.package)
+        elif entrypoint:
+            package_dir = entrypoint.parent
+            if (package_dir / "pyproject.toml").is_file() or (package_dir / "setup.py").is_file():
+                dependencies.append(str(package_dir))
+            elif not dependencies:
+                dependencies.append("mcp>=1.3.0,<2.0.0")
+
+        if dependencies:
+            await self._run(str(py_binary), "-m", "pip", "install", *dependencies)
+
+        if entrypoint:
+            command = str(py_binary)
+            args = [str(entrypoint)]
         else:
-            proc = await asyncio.create_subprocess_exec(
-                sys.executable, "-m", "venv", str(venv_dir),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            _, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                raise RuntimeError(f"Failed to create python venv: {stderr.decode()}")
-
-        # Step 2: Install package dependencies into isolated venv via `uv pip` (or pip)
-        pkg_spec = manifest.installation.package or manifest.id
-        if uv_cmd:
-            proc = await asyncio.create_subprocess_exec(
-                uv_cmd, "pip", "install", "--python", str(py_binary), pkg_spec,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            _, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                # Fallback gracefully if package is not published on PyPI
-                pass
-        else:
-            proc = await asyncio.create_subprocess_exec(
-                str(py_binary), "-m", "pip", "install", pkg_spec,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            await proc.communicate()
-
-        # Build entrypoint command
-        cmd = str(py_binary)
-        args = list(manifest.entrypoint.args)
-        if args and args[0] in ("python", "python3"):
-            args = args[1:]
-
-        return {
-            "command": cmd,
-            "args": args,
-            "env": manifest.entrypoint.env or {}
-        }
+            command = manifest.entrypoint.command or str(py_binary)
+            args = list(manifest.entrypoint.args)
+        return {"command": command, "args": args, "env": manifest.entrypoint.env or {}}

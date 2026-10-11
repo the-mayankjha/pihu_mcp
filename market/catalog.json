@@ -635,6 +635,114 @@
       "status": "active",
       "verified": false,
       "name": "spotify-mcp"
+    },
+    {
+      "id": "browser-mcp",
+      "name": "playwright-mcp",
+      "display_name": "Playwright MCP",
+      "type": "mcp",
+      "description": "Official Microsoft Playwright MCP server for browser automation through accessible page snapshots and browser actions.",
+      "category": "Browser Automation",
+      "version": "0.0.83",
+      "author": {
+        "name": "Microsoft Corporation"
+      },
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/microsoft/playwright-mcp"
+      },
+      "runtime": {
+        "type": "node"
+      },
+      "transport": {
+        "type": "stdio"
+      },
+      "requirements": [
+        "Node.js 18 or newer"
+      ],
+      "tools": [
+        {
+          "name": "browser_navigate",
+          "description": "Navigate to a URL."
+        },
+        {
+          "name": "browser_navigate_back",
+          "description": "Go back in browser history."
+        },
+        {
+          "name": "browser_snapshot",
+          "description": "Capture the current page accessibility snapshot."
+        },
+        {
+          "name": "browser_find",
+          "description": "Find text or patterns in the page snapshot."
+        },
+        {
+          "name": "browser_click",
+          "description": "Click a page element."
+        },
+        {
+          "name": "browser_hover",
+          "description": "Hover over a page element."
+        },
+        {
+          "name": "browser_drag",
+          "description": "Drag and drop between page elements."
+        },
+        {
+          "name": "browser_type",
+          "description": "Type text into a page element."
+        },
+        {
+          "name": "browser_fill_form",
+          "description": "Fill multiple form fields."
+        },
+        {
+          "name": "browser_select_option",
+          "description": "Select dropdown options."
+        },
+        {
+          "name": "browser_press_key",
+          "description": "Press a keyboard key."
+        },
+        {
+          "name": "browser_take_screenshot",
+          "description": "Capture a page screenshot."
+        },
+        {
+          "name": "browser_handle_dialog",
+          "description": "Accept or dismiss a browser dialog."
+        },
+        {
+          "name": "browser_tabs",
+          "description": "List and manage open tabs."
+        },
+        {
+          "name": "browser_close",
+          "description": "Close the current page."
+        }
+      ],
+      "tool_count": 15,
+      "installation": {
+        "type": "npm",
+        "package": "@playwright/mcp@0.0.83",
+        "entrypoint": "node_modules/@playwright/mcp/cli.js",
+        "command": "node",
+        "args": [
+          "--browser",
+          "chromium"
+        ]
+      },
+      "connection": "available",
+      "status": "active",
+      "verified": true,
+      "entrypoint": {
+        "command": "node",
+        "args": [
+          "--browser",
+          "chromium"
+        ]
+      }
     }
   ]
 }
