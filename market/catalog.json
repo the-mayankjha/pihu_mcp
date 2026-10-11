@@ -1,0 +1,640 @@
+{
+  "schema_version": 1,
+  "registry": "PIHU MCP Catalog",
+  "packages": [
+    {
+      "id": "pihu-file-mcp",
+      "description": "Search, read, write, edit, copy and organize files with PIHU.",
+      "category": "Filesystem",
+      "runtime": {
+        "type": "python"
+      },
+      "tags": [
+        "files",
+        "filesystem",
+        "search",
+        "read",
+        "write"
+      ],
+      "type": "mcp",
+      "display_name": "PIHU File MCP",
+      "version": "1.0.0",
+      "author": {
+        "name": "Mayank Jha (PIHU)"
+      },
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/the-mayankjha/pihu_mcp",
+        "branch": "pihu_market"
+      },
+      "transport": {
+        "type": "stdio"
+      },
+      "tools": [
+        {
+          "name": "list_directory",
+          "description": "List directory contents with detailed file metadata (size, type, modified time)."
+        },
+        {
+          "name": "tree",
+          "description": "Generate a formatted directory tree visualization up to specified depth."
+        },
+        {
+          "name": "directory_exists",
+          "description": "Check if a directory exists at specified path."
+        },
+        {
+          "name": "get_directory_size",
+          "description": "Calculate total size of directory in bytes and file count."
+        },
+        {
+          "name": "stat_file",
+          "description": "Get complete metadata for a file (size, line count, extension, permissions, modified time)."
+        },
+        {
+          "name": "get_file_hash",
+          "description": "Calculate cryptographic hash (sha256 or md5) of a file for integrity check."
+        },
+        {
+          "name": "read_file",
+          "description": "Read complete or partial text contents of a file."
+        },
+        {
+          "name": "read_lines",
+          "description": "Read a specific line range from a text file (1-indexed, inclusive)."
+        },
+        {
+          "name": "read_head",
+          "description": "Read first N lines of a file."
+        },
+        {
+          "name": "read_tail",
+          "description": "Read last N lines of a file."
+        },
+        {
+          "name": "create_file",
+          "description": "Create a new file at path with optional initial content."
+        },
+        {
+          "name": "create_directory",
+          "description": "Create a directory and any necessary parent directories."
+        },
+        {
+          "name": "write_file",
+          "description": "Write content to file, creating or completely overwriting existing file."
+        },
+        {
+          "name": "write_batch_files",
+          "description": "Write multiple files to disk at once for rapid project scaffolding. Each dictionary has 'path' and 'content'."
+        },
+        {
+          "name": "append_file",
+          "description": "Append text content to the end of an existing file."
+        },
+        {
+          "name": "replace_text",
+          "description": "Search and replace exact target text string inside a file."
+        },
+        {
+          "name": "copy_file",
+          "description": "Copy a file or directory from src to dst."
+        },
+        {
+          "name": "move_file",
+          "description": "Move or rename a file/directory from src to dst."
+        },
+        {
+          "name": "trash_file",
+          "description": "Safely move a file or directory to the local .trash directory."
+        },
+        {
+          "name": "search_files",
+          "description": "Fast, recursive file and directory search matching name, query, or file extension."
+        },
+        {
+          "name": "explore_directory",
+          "description": "Deep structural directory explorer returning directory hierarchy, stats, and contents summary."
+        },
+        {
+          "name": "change_directory",
+          "description": "Change the active current working directory for PIHU session."
+        },
+        {
+          "name": "find_files",
+          "description": "Search files matching glob pattern (e.g. '*.py', 'invoice*.pdf') starting at path."
+        },
+        {
+          "name": "grep_search",
+          "description": "Search for exact text query inside all text files in a directory."
+        }
+      ],
+      "tool_count": 24,
+      "requirements": [
+        "Python 3.10 or newer"
+      ],
+      "installation": {
+        "type": "git",
+        "repository": "https://github.com/the-mayankjha/pihu_mcp",
+        "entrypoint": "mcp/servers/pihu_file_mcp.py"
+      },
+      "connection": "unavailable",
+      "status": "active",
+      "verified": false,
+      "name": "pihu-file-mcp"
+    },
+    {
+      "id": "pihu-system-mcp",
+      "description": "Inspect system status, processes, time and notifications from PIHU.",
+      "category": "System",
+      "runtime": {
+        "type": "python"
+      },
+      "tags": [
+        "system",
+        "processes",
+        "status",
+        "notifications"
+      ],
+      "type": "mcp",
+      "display_name": "PIHU System MCP",
+      "version": "1.0.0",
+      "author": {
+        "name": "Mayank Jha (PIHU)"
+      },
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/the-mayankjha/pihu_mcp",
+        "branch": "pihu_market"
+      },
+      "transport": {
+        "type": "stdio"
+      },
+      "tools": [
+        {
+          "name": "get_system_info",
+          "description": "Retrieve system identity, OS, kernel, CPU model, architecture, Python version, and uptime."
+        },
+        {
+          "name": "get_system_status",
+          "description": "Get real-time snapshot of CPU load %, Memory (RAM) usage, Disk usage %, and Battery."
+        },
+        {
+          "name": "get_system_snapshot",
+          "description": "Get a unified, comprehensive snapshot of system identity, hardware resources, storage, and current datetime in a single call."
+        },
+        {
+          "name": "get_current_time",
+          "description": "Get current time, date, day of week, and timezone offset for a specified IANA timezone."
+        },
+        {
+          "name": "list_processes",
+          "description": "List active running processes with PID, name, CPU %, and Memory % usage."
+        },
+        {
+          "name": "run_shell",
+          "description": "Safely execute a shell command and return stdout/stderr/exit code."
+        },
+        {
+          "name": "send_notification",
+          "description": "Send a native OS desktop notification."
+        }
+      ],
+      "tool_count": 7,
+      "requirements": [
+        "Python 3.10 or newer"
+      ],
+      "installation": {
+        "type": "git",
+        "repository": "https://github.com/the-mayankjha/pihu_mcp",
+        "entrypoint": "mcp/servers/pihu_system_mcp.py"
+      },
+      "connection": "unavailable",
+      "status": "active",
+      "verified": false,
+      "name": "pihu-system-mcp"
+    },
+    {
+      "id": "pihu-web-search-mcp",
+      "description": "Search the public web and safely retrieve pages and files.",
+      "category": "Search",
+      "runtime": {
+        "type": "python"
+      },
+      "tags": [
+        "web",
+        "search",
+        "fetch",
+        "research"
+      ],
+      "type": "mcp",
+      "display_name": "PIHU Web Search MCP",
+      "version": "1.0.0",
+      "author": {
+        "name": "Mayank Jha (PIHU)"
+      },
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/the-mayankjha/pihu_mcp",
+        "branch": "pihu_market"
+      },
+      "transport": {
+        "type": "stdio"
+      },
+      "tools": [
+        {
+          "name": "web_search",
+          "description": "Search the public web and return normalized, ranked search results."
+        },
+        {
+          "name": "web_fetch",
+          "description": "Safely fetch a public HTTP(S) webpage and extract readable content."
+        },
+        {
+          "name": "web_search_and_read",
+          "description": "Search the web, fetch the top sources concurrently, and return evidence."
+        },
+        {
+          "name": "web_download_file",
+          "description": "Download a file (PDF, image, ZIP, dataset, code, binary) from any public URL into workspace."
+        },
+        {
+          "name": "web_search_and_download",
+          "description": "Search the web for specific files (PDF, ZIP, CSV, etc.) and download matching files into workspace."
+        },
+        {
+          "name": "web_capabilities",
+          "description": "Return machine-readable capabilities for PIHU's capability registry."
+        }
+      ],
+      "tool_count": 6,
+      "requirements": [
+        "Python 3.10 or newer"
+      ],
+      "installation": {
+        "type": "git",
+        "repository": "https://github.com/the-mayankjha/pihu_mcp",
+        "entrypoint": "mcp/servers/pihu-web-search-mcp/web_search_mcp/server.py"
+      },
+      "connection": "unavailable",
+      "status": "active",
+      "verified": false,
+      "name": "pihu-web-search-mcp"
+    },
+    {
+      "id": "pihu-project-mcp",
+      "description": "Scaffold, test, diagnose and manage development projects.",
+      "category": "Development",
+      "runtime": {
+        "type": "node"
+      },
+      "tags": [
+        "development",
+        "projects",
+        "scaffolding",
+        "testing"
+      ],
+      "type": "mcp",
+      "display_name": "PIHU Project MCP",
+      "version": "1.0.0",
+      "author": {
+        "name": "Mayank Jha (PIHU)"
+      },
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/the-mayankjha/pihu_mcp",
+        "branch": "pihu_market"
+      },
+      "transport": {
+        "type": "stdio"
+      },
+      "tools": [
+        {
+          "name": "pihu_scaffold_project",
+          "description": "Scaffolds multi-language and multi-tech-stack projects with complete boilerplate, tests, configs, and dependencies."
+        },
+        {
+          "name": "pihu_test_project",
+          "description": "Executes automated unit tests, typechecks, and build suites for any project directory across languages."
+        },
+        {
+          "name": "pihu_diagnose_and_fix",
+          "description": "Scans for build, typecheck, or missing dependency errors in a project, applies automated fixes (package installation, cache cleaning), and re-verifies."
+        },
+        {
+          "name": "pihu_health_check",
+          "description": "Performs a 360-degree health audit on a project and calculates a Health Score (0-100%)."
+        },
+        {
+          "name": "pihu_manage_server",
+          "description": "Lifecycle manager for dev servers (start, stop, restart, status)."
+        },
+        {
+          "name": "pihu_run_and_open_web",
+          "description": "Launches project dev server on a non-conflicting port and opens it in the browser."
+        }
+      ],
+      "tool_count": 6,
+      "requirements": [
+        "Node.js 18 or newer"
+      ],
+      "installation": {
+        "type": "git",
+        "repository": "https://github.com/the-mayankjha/pihu_mcp",
+        "entrypoint": "mcp/servers/pihu_project_mcp.js"
+      },
+      "connection": "unavailable",
+      "status": "active",
+      "verified": false,
+      "name": "pihu-project-mcp"
+    },
+    {
+      "id": "google-workspace-mcp",
+      "description": "Work with Gmail, Calendar, Tasks, Drive and Docs through PIHU.",
+      "category": "Productivity",
+      "runtime": {
+        "type": "python"
+      },
+      "tags": [
+        "google",
+        "gmail",
+        "calendar",
+        "drive",
+        "docs"
+      ],
+      "type": "mcp",
+      "display_name": "Google Workspace MCP",
+      "version": "1.0.0",
+      "author": {
+        "name": "Google"
+      },
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/the-mayankjha/pihu_mcp",
+        "branch": "pihu_market"
+      },
+      "transport": {
+        "type": "stdio"
+      },
+      "tools": [
+        {
+          "name": "gmail_search",
+          "description": "Search user's real Gmail messages for a query string."
+        },
+        {
+          "name": "gmail_check_unread",
+          "description": "Check for unread Gmail messages using real Gmail API."
+        },
+        {
+          "name": "gmail_send",
+          "description": "Send a real email to a recipient via Gmail API."
+        },
+        {
+          "name": "gmail_get_message",
+          "description": "Get full details and content of a specific Gmail message by ID."
+        },
+        {
+          "name": "calendar_list",
+          "description": "List upcoming real Google Calendar events."
+        },
+        {
+          "name": "calendar_create_event",
+          "description": "Create a new event on Google Calendar with a real Google Meet video call link."
+        },
+        {
+          "name": "tasks_list_tasks",
+          "description": "List tasks from real Google Tasks API."
+        },
+        {
+          "name": "tasks_create_task",
+          "description": "Create a task in Google Tasks."
+        },
+        {
+          "name": "docs_create",
+          "description": "Create a real Google Doc via Google Docs API."
+        },
+        {
+          "name": "drive_search",
+          "description": "Search files in Google Drive."
+        }
+      ],
+      "tool_count": 10,
+      "requirements": [
+        "Python 3.10 or newer"
+      ],
+      "installation": {
+        "type": "git",
+        "repository": "https://github.com/the-mayankjha/pihu_mcp",
+        "entrypoint": "mcp/servers/google.py"
+      },
+      "connection": "unavailable",
+      "status": "active",
+      "verified": false,
+      "name": "google-workspace-mcp"
+    },
+    {
+      "id": "pihu-whatsapp-mcp",
+      "description": "Search conversations and contacts, read messages, and send messages or media.",
+      "category": "Communication",
+      "runtime": {
+        "type": "python"
+      },
+      "tags": [
+        "whatsapp",
+        "messages",
+        "contacts",
+        "media"
+      ],
+      "type": "mcp",
+      "display_name": "PIHU WhatsApp MCP",
+      "version": "1.0.0",
+      "author": {
+        "name": "Mayank Jha (PIHU)"
+      },
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/the-mayankjha/pihu_mcp",
+        "branch": "pihu_market"
+      },
+      "transport": {
+        "type": "stdio"
+      },
+      "tools": [
+        {
+          "name": "whatsapp_send_message",
+          "description": "Send a WhatsApp text message to a person by name, nickname, phone number, or JID.\n\nArgs:\n    recipient: Name (e.g. 'Anin', 'Mayank'), phone number with country code (e.g. '919876543210'), or JID.\n    message: The text content of the message to send."
+        },
+        {
+          "name": "whatsapp_search_contacts",
+          "description": "Search contacts across both WhatsApp conversation history and PIHU People directory.\n\nArgs:\n    query: Name, nickname, or phone number to search."
+        },
+        {
+          "name": "whatsapp_list_messages",
+          "description": "Get WhatsApp messages matching search criteria from local message store.\n\nArgs:\n    query: Text substring to search within message contents.\n    sender_phone_number: Filter by sender phone number.\n    chat_jid: Filter by chat JID.\n    limit: Max messages to return (default 15)."
+        },
+        {
+          "name": "whatsapp_list_chats",
+          "description": "List all active WhatsApp conversations and their last message timestamps.\n\nArgs:\n    limit: Max conversations to return (default 15)."
+        },
+        {
+          "name": "whatsapp_get_last_interaction",
+          "description": "Get the most recent WhatsApp message exchanged with a specific person or phone number.\n\nArgs:\n    contact_name_or_phone: The name or phone number of the contact."
+        },
+        {
+          "name": "whatsapp_send_file",
+          "description": "Send an image, video, document, or audio file to a recipient via WhatsApp.\n\nArgs:\n    recipient: Name, phone number with country code, or JID.\n    media_path: Absolute local filesystem path to the file."
+        },
+        {
+          "name": "whatsapp_download_media",
+          "description": "Download media attachments from a WhatsApp message to local storage.\n\nArgs:\n    message_id: The WhatsApp message ID containing media.\n    chat_jid: The chat JID where the message was received."
+        }
+      ],
+      "tool_count": 7,
+      "requirements": [
+        "Python 3.10 or newer"
+      ],
+      "installation": {
+        "type": "git",
+        "repository": "https://github.com/the-mayankjha/pihu_mcp",
+        "entrypoint": "mcp/servers/pihu_whatsapp_mcp.py"
+      },
+      "connection": "unavailable",
+      "status": "active",
+      "verified": false,
+      "name": "pihu-whatsapp-mcp"
+    },
+    {
+      "id": "github-mcp",
+      "description": "Search GitHub repositories and work with issues, pull requests and files.",
+      "category": "Development",
+      "runtime": {
+        "type": "python"
+      },
+      "tags": [
+        "github",
+        "repositories",
+        "issues",
+        "pull requests"
+      ],
+      "type": "mcp",
+      "display_name": "PIHU GitHub MCP",
+      "version": "1.0.0",
+      "author": {
+        "name": "Mayank Jha (PIHU)"
+      },
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/the-mayankjha/pihu_mcp",
+        "branch": "pihu_market"
+      },
+      "transport": {
+        "type": "stdio"
+      },
+      "tools": [
+        {
+          "name": "github_search_repositories",
+          "description": "Search GitHub repositories by query string (e.g. 'language:python topic:mcp')."
+        },
+        {
+          "name": "github_get_repository",
+          "description": "Get full details of a GitHub repository."
+        },
+        {
+          "name": "github_list_issues",
+          "description": "List issues for a given GitHub repository."
+        },
+        {
+          "name": "github_create_issue",
+          "description": "Create a new issue in a GitHub repository (Requires GITHUB_TOKEN)."
+        },
+        {
+          "name": "github_list_pull_requests",
+          "description": "List pull requests for a given GitHub repository."
+        },
+        {
+          "name": "github_get_file_contents",
+          "description": "Get raw contents of a file from a GitHub repository."
+        },
+        {
+          "name": "github_list_commits",
+          "description": "List recent commits in a repository."
+        }
+      ],
+      "tool_count": 7,
+      "requirements": [
+        "Python 3.10 or newer"
+      ],
+      "installation": {
+        "type": "git",
+        "repository": "https://github.com/the-mayankjha/pihu_mcp",
+        "entrypoint": "mcp/servers/pihu_github_mcp.py"
+      },
+      "connection": "unavailable",
+      "status": "active",
+      "verified": false,
+      "name": "github-mcp"
+    },
+    {
+      "id": "spotify-mcp",
+      "description": "Search Spotify and control music playback with PIHU.",
+      "category": "Media",
+      "runtime": {
+        "type": "python"
+      },
+      "tags": [
+        "spotify",
+        "music",
+        "playback",
+        "search"
+      ],
+      "type": "mcp",
+      "display_name": "PIHU Spotify MCP",
+      "version": "1.0.0",
+      "author": {
+        "name": "Mayank Jha (PIHU)"
+      },
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/the-mayankjha/pihu_mcp",
+        "branch": "pihu_market"
+      },
+      "transport": {
+        "type": "stdio"
+      },
+      "tools": [
+        {
+          "name": "spotify_search",
+          "description": "Search Spotify for tracks, artists, albums, or playlists."
+        },
+        {
+          "name": "spotify_get_current_playback",
+          "description": "Get information about the user's current Spotify playback state."
+        },
+        {
+          "name": "spotify_playback_control",
+          "description": "Control Spotify playback ('play', 'pause', 'next', 'previous')."
+        },
+        {
+          "name": "spotify_set_volume",
+          "description": "Set the volume for the user's current Spotify playback device (0-100)."
+        },
+        {
+          "name": "spotify_list_user_playlists",
+          "description": "List playlists owned or followed by the current Spotify user."
+        }
+      ],
+      "tool_count": 5,
+      "requirements": [
+        "Python 3.10 or newer"
+      ],
+      "installation": {
+        "type": "git",
+        "repository": "https://github.com/the-mayankjha/pihu_mcp",
+        "entrypoint": "mcp/servers/pihu_spotify_mcp.py"
+      },
+      "connection": "unavailable",
+      "status": "active",
+      "verified": false,
+      "name": "spotify-mcp"
+    }
+  ]
+}
