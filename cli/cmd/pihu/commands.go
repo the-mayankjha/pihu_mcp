@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -254,9 +256,12 @@ func findWhatsAppBridgeDir() (string, string) {
 }
 
 func ensureWhatsAppBridgeRunning() error {
-	client := http.Client{Timeout: 400 * time.Millisecond}
-	if resp, err := client.Get("http://localhost:8080/api/status"); err == nil && resp.StatusCode == 200 {
-		resp.Body.Close()
+	client := http.Client{Timeout: 800 * time.Millisecond}
+	recognized, ready, err := inspectWhatsAppBridge(&client)
+	if err != nil {
+		return err
+	}
+	if ready {
 		return nil
 	}
 
@@ -264,12 +269,25 @@ func ensureWhatsAppBridgeRunning() error {
 	if dir == "" {
 		return fmt.Errorf("whatsapp-bridge directory not found")
 	}
+	if recognized {
+		if err := stopStaleWhatsAppBridge(); err != nil {
+			return err
+		}
+	}
 
 	var cmd *exec.Cmd
-	if bin != "" {
+	// Prefer source whenever it is available so an old cached binary cannot
+	// silently keep serving status while missing the local auth page.
+	if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+		if _, err := exec.LookPath("go"); err == nil {
+			cmd = exec.Command("go", "run", ".")
+		}
+	}
+	if cmd == nil && bin != "" {
 		cmd = exec.Command(bin)
-	} else {
-		cmd = exec.Command("go", "run", "main.go")
+	}
+	if cmd == nil {
+		return fmt.Errorf("updated WhatsApp bridge source or executable was not found")
 	}
 	cmd.Dir = dir
 	if logFile, err := os.OpenFile("/tmp/pihu_whatsapp_bridge.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
@@ -281,15 +299,80 @@ func ensureWhatsAppBridgeRunning() error {
 		return fmt.Errorf("failed to spawn bridge process: %w", err)
 	}
 
-	// Wait up to 6 seconds for bridge HTTP server to become responsive
-	for i := 0; i < 30; i++ {
+	// Wait for both the API and the local auth page, not just any old status API.
+	for i := 0; i < 75; i++ {
 		time.Sleep(200 * time.Millisecond)
-		if resp, err := client.Get("http://localhost:8080/api/status"); err == nil && resp.StatusCode == 200 {
-			resp.Body.Close()
+		_, ready, err := inspectWhatsAppBridge(&client)
+		if err != nil {
+			return err
+		}
+		if ready {
 			return nil
 		}
 	}
-	return nil
+	return fmt.Errorf("WhatsApp bridge did not serve the local auth page within 15 seconds; check /tmp/pihu_whatsapp_bridge.log")
+}
+
+func inspectWhatsAppBridge(client *http.Client) (recognized bool, ready bool, err error) {
+	resp, err := client.Get("http://127.0.0.1:8080/api/status")
+	if err != nil {
+		return false, false, nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false, false, nil
+	}
+	var status map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return false, false, fmt.Errorf("port 8080 returned an invalid WhatsApp bridge status: %w", err)
+	}
+	if _, ok := status["connected"].(bool); !ok {
+		return false, false, fmt.Errorf("port 8080 is occupied by a service other than the WhatsApp bridge")
+	}
+	if _, ok := status["logged_in"].(bool); !ok {
+		return false, false, fmt.Errorf("port 8080 is occupied by a service other than the WhatsApp bridge")
+	}
+
+	page, err := client.Get("http://127.0.0.1:8080/mcp/whatsapp/auth")
+	if err != nil {
+		return true, false, nil
+	}
+	defer page.Body.Close()
+	if page.StatusCode != http.StatusOK {
+		return true, false, nil
+	}
+	body, err := io.ReadAll(page.Body)
+	if err != nil {
+		return true, false, err
+	}
+	return true, strings.Contains(string(body), `name="pihu-whatsapp-auth" content="local-v1"`), nil
+}
+
+func stopStaleWhatsAppBridge() error {
+	if runtime.GOOS == "windows" {
+		return fmt.Errorf("the WhatsApp bridge on port 8080 is outdated; restart PIHU to replace it")
+	}
+	output, err := exec.Command("lsof", "-tiTCP:8080", "-sTCP:LISTEN").Output()
+	if err != nil && len(output) == 0 {
+		return fmt.Errorf("could not identify the outdated WhatsApp bridge listener: %w", err)
+	}
+	for _, line := range strings.Fields(string(output)) {
+		pid, err := strconv.Atoi(line)
+		if err != nil {
+			continue
+		}
+		process, err := os.FindProcess(pid)
+		if err == nil {
+			_ = process.Signal(os.Interrupt)
+		}
+	}
+	for attempt := 0; attempt < 50; attempt++ {
+		if _, err := exec.Command("lsof", "-tiTCP:8080", "-sTCP:LISTEN").Output(); err != nil {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("the outdated WhatsApp bridge did not release port 8080")
 }
 
 type PihuContact struct {
