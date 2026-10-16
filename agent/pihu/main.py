@@ -50,7 +50,7 @@ def main():
     parser.add_argument("prompt", type=str, nargs="?", help="Task prompt for PIHU to execute")
     parser.add_argument("--json", action="store_true", help="Emit events as JSON-Lines only (for Go CLI IPC)")
     parser.add_argument("--provider", type=str, choices=["ollama", "gemini"], help="Preferred LLM provider")
-    parser.add_argument("--model", type=str, help="Preferred model name (e.g. qwen3:4b, gemini-2.0-flash)")
+    parser.add_argument("--model", type=str, help="Preferred model name (e.g. qwen3:4b, gemini-3.8-flash)")
     args = parser.parse_args()
 
     try:

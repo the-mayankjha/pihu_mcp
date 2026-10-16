@@ -34,6 +34,8 @@ class MCPInstallationSpec:
     package: Optional[str] = None
     url: Optional[str] = None
     checksum_sha256: Optional[str] = None
+    entrypoint: Optional[str] = None
+    dependencies: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -77,6 +79,10 @@ class MCPPackageManifest:
     permissions: MCPPermissions = field(default_factory=MCPPermissions)
     endpoint: Optional[str] = None
     tools_provided: List[str] = field(default_factory=list)
+    tool_definitions: List[Dict[str, Any]] = field(default_factory=list)
+    display_name: Optional[str] = None
+    artifacts: List[Dict[str, Any]] = field(default_factory=list)
+    compatibility: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "MCPPackageManifest":
@@ -84,7 +90,17 @@ class MCPPackageManifest:
         repo = MCPRepositoryInfo(**repo_data) if isinstance(repo_data, dict) else None
 
         inst_data = data.get("installation", {})
-        inst = MCPInstallationSpec(**inst_data) if isinstance(inst_data, dict) else MCPInstallationSpec()
+        if isinstance(inst_data, dict):
+            inst = MCPInstallationSpec(
+                method=inst_data.get("method", inst_data.get("type", "pip")),
+                package=inst_data.get("package"),
+                url=inst_data.get("url", inst_data.get("repository")),
+                checksum_sha256=inst_data.get("checksum_sha256"),
+                entrypoint=inst_data.get("entrypoint"),
+                dependencies=inst_data.get("dependencies", []) if isinstance(inst_data.get("dependencies", []), list) else [],
+            )
+        else:
+            inst = MCPInstallationSpec()
 
         ep_data = data.get("entrypoint", {})
         ep = MCPEntrypoint(**ep_data) if isinstance(ep_data, dict) else MCPEntrypoint()
@@ -96,16 +112,28 @@ class MCPPackageManifest:
         perm = MCPPermissions(**perm_data) if isinstance(perm_data, dict) else MCPPermissions()
 
         runtime_val = data.get("runtime", "python")
+        if isinstance(runtime_val, dict):
+            runtime_val = runtime_val.get("type", "python")
         try:
             runtime_enum = MCPRuntimeType(runtime_val)
         except ValueError:
             runtime_enum = MCPRuntimeType.PYTHON
 
         transport_val = data.get("transport", "stdio")
+        if isinstance(transport_val, dict):
+            transport_val = transport_val.get("type", "stdio")
         try:
             transport_enum = MCPTransportType(transport_val)
         except ValueError:
             transport_enum = MCPTransportType.STDIO
+
+        author_data = data.get("author", "")
+        author = author_data.get("name", "") if isinstance(author_data, dict) else author_data
+        tools_data = data.get("tools_provided", data.get("tools", []))
+        tools = [item.get("name", "") if isinstance(item, dict) else str(item) for item in tools_data]
+        artifacts = data.get("artifacts", [])
+        if not inst.checksum_sha256 and artifacts and isinstance(artifacts[0], dict):
+            inst.checksum_sha256 = artifacts[0].get("sha256")
 
         return cls(
             schema_version=data.get("schema_version", 1),
@@ -113,7 +141,7 @@ class MCPPackageManifest:
             name=data.get("name", ""),
             version=data.get("version", "1.0.0"),
             description=data.get("description", ""),
-            author=data.get("author", ""),
+            author=author,
             license=data.get("license", "MIT"),
             category=data.get("category", "General"),
             runtime=runtime_enum,
@@ -124,7 +152,11 @@ class MCPPackageManifest:
             requirements=req,
             permissions=perm,
             endpoint=data.get("endpoint"),
-            tools_provided=data.get("tools_provided", []),
+            tools_provided=[tool for tool in tools if tool],
+            tool_definitions=[tool for tool in tools_data if isinstance(tool, dict) and isinstance(tool.get("name"), str)],
+            display_name=data.get("display_name"),
+            artifacts=artifacts if isinstance(artifacts, list) else [],
+            compatibility=data.get("compatibility", {}) if isinstance(data.get("compatibility", {}), dict) else {},
         )
 
     def to_dict(self) -> Dict[str, Any]:

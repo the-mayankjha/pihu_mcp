@@ -2,7 +2,6 @@ import sys
 import os
 import json
 import ssl
-import subprocess
 import urllib.parse
 import urllib.request
 import base64
@@ -30,127 +29,95 @@ def refresh_access_token():
     if not os.path.exists(TOKEN_PATH):
         return None
     try:
-        with open(TOKEN_PATH, "r") as f:
-            data = json.load(f)
+        with open(TOKEN_PATH, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
         refresh_token = data.get("refresh_token")
-        if not refresh_token and data.get("current_user"):
+        if not refresh_token and isinstance(data.get("current_user"), dict):
             refresh_token = data["current_user"].get("refresh_token")
         if not refresh_token:
             return None
 
-        client_id = data.get("client_id") or os.environ.get("GOOGLE_CLIENT_ID", "")
-        client_secret = data.get("client_secret") or os.environ.get("GOOGLE_CLIENT_SECRET", "")
-
-        if not client_id or not client_secret:
-            for cpath in [
-                os.path.expanduser("~/.gworkspace-mcp/credentials.json"),
-                os.path.expanduser("~/.config/google-workspace-mcp/credentials.json")
-            ]:
-                if os.path.exists(cpath):
-                    try:
-                        with open(cpath, "r") as f:
-                            c_data = json.load(f).get("installed", {})
-                            if not client_id:
-                                client_id = c_data.get("client_id", "")
-                            if not client_secret:
-                                client_secret = c_data.get("client_secret", "")
-                    except Exception:
-                        pass
-
-        if not client_id or not client_secret:
-            print("Token refresh error: Missing client_id or client_secret. Please re-link account in Settings.", file=sys.stderr)
+        request_body = json.dumps({"refresh_token": refresh_token}).encode("utf-8")
+        request = urllib.request.Request(
+            "https://pihu.nfks.co.in/api/v2/oauth/google/refresh",
+            data=request_body,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, context=ssl.create_default_context(), timeout=20) as response:
+                token_response = json.loads(response.read().decode("utf-8"))
+        except Exception:
+            # If the hosted broker is down, refresh fallback credentials directly
+            # with Google using the OAuth client already configured on this device.
+            client_id = data.get("client_id")
+            client_secret = data.get("client_secret")
+            if not client_id or not client_secret:
+                raise
+            form = urllib.parse.urlencode({
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            }).encode("ascii")
+            local_request = urllib.request.Request(
+                "https://oauth2.googleapis.com/token", data=form,
+                headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+            )
+            with urllib.request.urlopen(local_request, context=ssl.create_default_context(), timeout=20) as response:
+                token_response = json.loads(response.read().decode("utf-8"))
+        new_access_token = token_response.get("access_token")
+        if not new_access_token:
             return None
-
-        token_url = "https://oauth2.googleapis.com/token"
-        post_data = urllib.parse.urlencode({
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "refresh_token": refresh_token,
-            "grant_type": "refresh_token"
-        }).encode("utf-8")
-
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        req = urllib.request.Request(token_url, data=post_data, headers={"Content-Type": "application/x-www-form-urlencoded"})
-
-        with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
-            token_resp = json.loads(resp.read().decode("utf-8"))
-            new_access_token = token_resp.get("access_token")
-            if new_access_token:
-                data["access_token"] = new_access_token
-                data["client_id"] = client_id
-                data["client_secret"] = client_secret
-                if "current_user" in data and isinstance(data["current_user"], dict):
-                    data["current_user"]["access_token"] = new_access_token
-                curr_email = data.get("current_user", {}).get("email") if isinstance(data.get("current_user"), dict) else None
-                if "accounts" in data and isinstance(data["accounts"], list):
-                    for acc in data["accounts"]:
-                        if curr_email and acc.get("email") == curr_email:
-                            acc["access_token"] = new_access_token
-                with open(TOKEN_PATH, "w") as f_out:
-                    json.dump(data, f_out, indent=2)
-                return new_access_token
-    except Exception as e:
-        print(f"Token refresh failed: {e}", file=sys.stderr)
-    return None
+        data["access_token"] = new_access_token
+        if isinstance(data.get("current_user"), dict):
+            data["current_user"]["access_token"] = new_access_token
+        email = data.get("current_user", {}).get("email") if isinstance(data.get("current_user"), dict) else None
+        for account in data.get("accounts", []):
+            if email and account.get("email", "").lower() == email.lower():
+                account["access_token"] = new_access_token
+        with open(TOKEN_PATH, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=2)
+        os.chmod(TOKEN_PATH, 0o600)
+        return new_access_token
+    except Exception as error:
+        print(f"Token refresh failed: {error}", file=sys.stderr)
+        return None
 
 def make_google_api_request(url, method="GET", headers=None, data=None, retry_on_401=True):
-    access_token, refresh_token = get_tokens()
+    access_token, _refresh_token = get_tokens()
     if not access_token:
         raise Exception("No active Google OAuth access token found. Please link your account in Settings.")
 
-    if headers is None:
-        headers = {}
-    headers["Authorization"] = f"Bearer {access_token}"
+    request_headers = dict(headers or {})
+    request_headers["Authorization"] = f"Bearer {access_token}"
+    body_bytes = None
+    if data is not None:
+        if isinstance(data, dict):
+            body_bytes = json.dumps(data).encode("utf-8")
+            request_headers["Content-Type"] = "application/json"
+        elif isinstance(data, str):
+            body_bytes = data.encode("utf-8")
 
+    request = urllib.request.Request(url, data=body_bytes, headers=request_headers, method=method)
     try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        
-        body_bytes = None
-        if data is not None:
-            if isinstance(data, dict):
-                body_bytes = json.dumps(data).encode("utf-8")
-                headers["Content-Type"] = "application/json"
-            elif isinstance(data, str):
-                body_bytes = data.encode("utf-8")
-
-        req = urllib.request.Request(url, data=body_bytes, headers=headers, method=method)
-        with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
-            resp_body = resp.read().decode("utf-8")
-            return json.loads(resp_body) if resp_body else {}
-    except urllib.error.HTTPError as http_err:
-        if http_err.code == 401 and retry_on_401:
+        with urllib.request.urlopen(request, context=ssl.create_default_context(), timeout=20) as response:
+            response_body = response.read().decode("utf-8")
+            return json.loads(response_body) if response_body else {}
+    except urllib.error.HTTPError as error:
+        if error.code == 401 and retry_on_401:
             new_token = refresh_access_token()
             if new_token:
                 return make_google_api_request(url, method=method, headers=headers, data=data, retry_on_401=False)
         try:
-            err_text = http_err.read().decode("utf-8")
-            err_json = json.loads(err_text)
-            err_msg = err_json.get("error", {}).get("message") or err_text
-            if "has not been used in project" in err_msg or "disabled" in err_msg:
-                raise Exception(f"Google API Disabled (HTTP 403): {err_msg}")
-            raise Exception(f"HTTP Error {http_err.code}: {err_msg}")
-        except Exception as read_err:
-            if "HTTP Error" in str(read_err) or "Google API Disabled" in str(read_err):
-                raise read_err
-            raise http_err
-    except Exception as e:
-        try:
-            curl_cmd = ["curl", "-s", "-X", method, url, "-H", f"Authorization: Bearer {access_token}"]
-            if data is not None:
-                if isinstance(data, dict):
-                    curl_cmd.extend(["-H", "Content-Type: application/json", "-d", json.dumps(data)])
-                elif isinstance(data, str):
-                    curl_cmd.extend(["-d", data])
-            
-            res = subprocess.run(curl_cmd, capture_output=True, text=True, check=True)
-            return json.loads(res.stdout) if res.stdout else {}
-        except Exception as e2:
-            raise Exception(f"Google API request to {url} failed: {str(e2)}")
-            raise Exception(f"Google API request to {url} failed: {str(e2)}")
+            error_text = error.read().decode("utf-8")
+            error_json = json.loads(error_text)
+            message = error_json.get("error", {}).get("message") or error_text
+            if "has not been used in project" in message or "disabled" in message:
+                raise Exception(f"Google API Disabled (HTTP 403): {message}")
+            raise Exception(f"HTTP Error {error.code}: {message}")
+        except (json.JSONDecodeError, AttributeError):
+            raise error
 
 # ── GMAIL ───────────────────────────────────────────────────────────────────
 

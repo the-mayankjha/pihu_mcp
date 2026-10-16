@@ -15,6 +15,7 @@ import (
 	"pihu/cli/internal/ipc"
 	"pihu/cli/internal/render"
 	"pihu/cli/internal/session"
+	"pihu/cli/internal/version"
 	"pihu/cli/internal/workspace"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -99,9 +100,15 @@ type ReplModel struct {
 
 	// MCP marketplace (/mcp)
 	mcpTab                  MCPTab
-	mcpConnected            []ConnectedMCPServer
+	mcpPreviousTab          MCPTab
+	mcpDefault              []CommunityMCPItem
+	mcpInstalled            []CommunityMCPItem
 	mcpCatalog              []CommunityMCPItem
-	selectedMCPConnectedIdx int
+	mcpDetail               *CommunityMCPItem
+	mcpRegistryMessage      string
+	mcpDetailScroll         int
+	selectedMCPDefaultIdx   int
+	selectedMCPInstalledIdx int
 	selectedMCPCatalogIdx   int
 
 	isBusy          bool
@@ -165,18 +172,32 @@ func NewReplModel(projectDir, initialProvider, initialModel string) ReplModel {
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(colMauve).Bold(true)
 
+	preference := loadModelPreference()
 	prov := initialProvider
+	if prov == "" && initialModel != "" {
+		if strings.HasPrefix(strings.ToLower(initialModel), "gemini") {
+			prov = "gemini"
+		} else {
+			prov = "ollama"
+		}
+	}
+	if prov == "" {
+		prov = preference.Provider
+	}
 	if prov == "" {
 		prov = "gemini"
 	}
 	mod := initialModel
 	if mod == "" {
-		if prov == "gemini" {
-			mod = "gemini-2.0-flash"
+		if preference.Model != "" && (preference.Provider == "" || preference.Provider == prov) {
+			mod = preference.Model
+		} else if prov == "gemini" {
+			mod = "gemini-3.8-flash"
 		} else {
 			mod = "qwen3:4b"
 		}
 	}
+	_ = saveModelPreference(prov, mod)
 
 	LoadThemeConfig()
 	curKey := DiscoverGeminiKey()
@@ -196,6 +217,8 @@ func NewReplModel(projectDir, initialProvider, initialModel string) ReplModel {
 		expandedExplores: make(map[string]bool),
 		spinner:          sp,
 		mode:             modeChat,
+		mcpDefault:       GetDefaultMCPs(nil),
+		mcpInstalled:     GetInstalledMCPs(nil),
 		provider:         prov,
 		model:            mod,
 		width:            120,
@@ -205,7 +228,14 @@ func NewReplModel(projectDir, initialProvider, initialModel string) ReplModel {
 }
 
 func (m ReplModel) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, m.spinner.Tick)
+	return tea.Batch(textinput.Blink, m.spinner.Tick, func() tea.Msg {
+		catalog, _ := FetchLiveMCPCatalog()
+		return mcpDashboardCatalogMsg{catalog: catalog}
+	})
+}
+
+type mcpDashboardCatalogMsg struct {
+	catalog []CommunityMCPItem
 }
 
 // ─── Update loop ─────────────────────────────────────────────────────────────
@@ -214,6 +244,12 @@ func (m ReplModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case mcpDashboardCatalogMsg:
+		if len(msg.catalog) > 0 {
+			m.mcpCatalog = msg.catalog
+			m.syncMCPInventory()
+		}
+		return m, nil
 
 	// Window resize
 	case tea.WindowSizeMsg:
@@ -534,6 +570,7 @@ func (m ReplModel) handleModelSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			selected := filtered[m.selectedModelIdx]
 			m.provider = selected.Provider
 			m.model = selected.Name
+			_ = saveModelPreference(m.provider, m.model)
 			m.mode = modeChat
 			m.input.Focus()
 			m.sess.AddSystem(fmt.Sprintf("✓ Switched model to %s (%s)", m.model, m.provider))
@@ -839,22 +876,88 @@ func (m ReplModel) handleDirBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *ReplModel) openMCPMarket() {
 	m.mode = modeMCPMarket
-	m.mcpTab = MCPTabConnected
-	m.mcpConnected = GetRealConnectedServers()
-	m.mcpCatalog = FetchLiveMCPCatalog()
-	m.selectedMCPConnectedIdx = 0
+	m.mcpTab = MCPTabDefault
+	m.refreshMCPRegistry()
+	m.selectedMCPDefaultIdx = 0
+	m.selectedMCPInstalledIdx = 0
 	m.selectedMCPCatalogIdx = 0
+}
+
+func (m *ReplModel) refreshMCPRegistry() {
+	m.mcpCatalog, m.mcpRegistryMessage = FetchLiveMCPCatalog()
+	m.syncMCPInventory()
+	m.mcpDetail = nil
+}
+
+func (m *ReplModel) syncMCPInventory() {
+	m.mcpDefault = GetDefaultMCPs(m.mcpCatalog)
+	m.mcpInstalled = GetInstalledMCPs(m.mcpCatalog)
+	defaults := make(map[string]bool, len(m.mcpDefault))
+	installed := make(map[string]bool, len(m.mcpInstalled))
+	for _, item := range m.mcpDefault {
+		defaults[item.ID] = true
+	}
+	for _, item := range m.mcpInstalled {
+		installed[item.ID] = true
+	}
+	for index := range m.mcpCatalog {
+		m.mcpCatalog[index].IsDefault = defaults[m.mcpCatalog[index].ID]
+		m.mcpCatalog[index].Installed = installed[m.mcpCatalog[index].ID]
+	}
+}
+
+func (m *ReplModel) selectedMCP() *CommunityMCPItem {
+	var items []CommunityMCPItem
+	var index int
+	switch m.mcpTab {
+	case MCPTabDefault:
+		items, index = m.mcpDefault, m.selectedMCPDefaultIdx
+	case MCPTabInstalled:
+		items, index = m.mcpInstalled, m.selectedMCPInstalledIdx
+	case MCPTabCatalog:
+		items, index = m.mcpCatalog, m.selectedMCPCatalogIdx
+	}
+	if index < 0 || index >= len(items) {
+		return nil
+	}
+	item := items[index]
+	return &item
+}
+
+func (m ReplModel) selectedMCPIndex() int {
+	switch m.mcpTab {
+	case MCPTabDefault:
+		return m.selectedMCPDefaultIdx
+	case MCPTabInstalled:
+		return m.selectedMCPInstalledIdx
+	default:
+		return m.selectedMCPCatalogIdx
+	}
+}
+
+func (m *ReplModel) openMCPDetails() {
+	item := m.selectedMCP()
+	if item == nil {
+		return
+	}
+	m.mcpPreviousTab = m.mcpTab
+	enriched := FetchMCPManifest(*item)
+	item = &enriched
+	m.mcpDetail = item
+	m.mcpDetailScroll = 0
+	m.mcpTab = MCPTabDetails
 }
 
 func (m ReplModel) handleMCPMarketKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c":
-		if m.mcpTab == MCPTabHelp {
-			m.mcpTab = MCPTabConnected
+		if m.mcpTab == MCPTabDetails {
+			m.mcpTab = m.mcpPreviousTab
+			m.mcpDetail = nil
 			return m, nil
 		}
-		if m.mcpTab == MCPTabGuide {
-			m.mcpTab = MCPTabCatalog
+		if m.mcpTab == MCPTabHelp {
+			m.mcpTab = MCPTabDefault
 			return m, nil
 		}
 		m.mode = modeChat
@@ -863,61 +966,75 @@ func (m ReplModel) handleMCPMarketKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "tab", "right", "l":
 		switch m.mcpTab {
-		case MCPTabConnected:
+		case MCPTabDefault:
+			m.mcpTab = MCPTabInstalled
+		case MCPTabInstalled:
 			m.mcpTab = MCPTabCatalog
-		case MCPTabCatalog:
-			m.mcpTab = MCPTabGuide
-		case MCPTabGuide:
+		case MCPTabCatalog, MCPTabDetails:
 			m.mcpTab = MCPTabHelp
 		default:
-			m.mcpTab = MCPTabConnected
+			m.mcpTab = MCPTabDefault
 		}
 		return m, nil
 
 	case "left", "h":
 		switch m.mcpTab {
+		case MCPTabInstalled:
+			m.mcpTab = MCPTabDefault
 		case MCPTabCatalog:
-			m.mcpTab = MCPTabConnected
-		case MCPTabGuide:
-			m.mcpTab = MCPTabCatalog
+			m.mcpTab = MCPTabInstalled
+		case MCPTabDetails:
+			m.mcpTab = m.mcpPreviousTab
+			m.mcpDetail = nil
 		case MCPTabHelp:
-			m.mcpTab = MCPTabGuide
+			m.mcpTab = MCPTabCatalog
 		default:
 			m.mcpTab = MCPTabHelp
 		}
 		return m, nil
 
 	case "1":
-		m.mcpTab = MCPTabConnected
+		m.mcpTab = MCPTabDefault
 		return m, nil
 
 	case "2":
+		m.mcpTab = MCPTabInstalled
+		return m, nil
+
+	case "3":
 		m.mcpTab = MCPTabCatalog
 		return m, nil
 
-	case "3", "g":
-		m.mcpTab = MCPTabGuide
+	case "d", "D":
+		if m.mcpTab == MCPTabDetails {
+			return m, nil
+		}
+		m.openMCPDetails()
 		return m, nil
 
 	case "4", "?":
 		if m.mcpTab == MCPTabHelp {
-			m.mcpTab = MCPTabConnected
+			m.mcpTab = MCPTabDefault
 		} else {
 			m.mcpTab = MCPTabHelp
 		}
 		return m, nil
 
 	case "c", "C":
-		m.mcpTab = MCPTabConnected
+		m.mcpTab = MCPTabCatalog
+		return m, nil
+
+	case "r", "R":
+		m.refreshMCPRegistry()
 		return m, nil
 
 	case "up", "ctrl+p", "k":
-		if m.mcpTab == MCPTabConnected {
-			if m.selectedMCPConnectedIdx > 0 {
-				m.selectedMCPConnectedIdx--
-			} else if len(m.mcpConnected) > 0 {
-				m.selectedMCPConnectedIdx = len(m.mcpConnected) - 1
-			}
+		if m.mcpTab == MCPTabDetails {
+			m.mcpDetailScroll = max(0, m.mcpDetailScroll-1)
+		} else if m.mcpTab == MCPTabDefault {
+			m.selectedMCPDefaultIdx = cycleIndex(m.selectedMCPDefaultIdx, len(m.mcpDefault), -1)
+		} else if m.mcpTab == MCPTabInstalled {
+			m.selectedMCPInstalledIdx = cycleIndex(m.selectedMCPInstalledIdx, len(m.mcpInstalled), -1)
 		} else if m.mcpTab == MCPTabCatalog {
 			if m.selectedMCPCatalogIdx > 0 {
 				m.selectedMCPCatalogIdx--
@@ -928,12 +1045,12 @@ func (m ReplModel) handleMCPMarketKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "down", "ctrl+n", "j":
-		if m.mcpTab == MCPTabConnected {
-			if m.selectedMCPConnectedIdx < len(m.mcpConnected)-1 {
-				m.selectedMCPConnectedIdx++
-			} else {
-				m.selectedMCPConnectedIdx = 0
-			}
+		if m.mcpTab == MCPTabDetails {
+			m.mcpDetailScroll++
+		} else if m.mcpTab == MCPTabDefault {
+			m.selectedMCPDefaultIdx = cycleIndex(m.selectedMCPDefaultIdx, len(m.mcpDefault), 1)
+		} else if m.mcpTab == MCPTabInstalled {
+			m.selectedMCPInstalledIdx = cycleIndex(m.selectedMCPInstalledIdx, len(m.mcpInstalled), 1)
 		} else if m.mcpTab == MCPTabCatalog {
 			if m.selectedMCPCatalogIdx < len(m.mcpCatalog)-1 {
 				m.selectedMCPCatalogIdx++
@@ -947,25 +1064,27 @@ func (m ReplModel) handleMCPMarketKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.mcpTab == MCPTabHelp {
 			return m, nil
 		}
-		if m.mcpTab == MCPTabConnected {
-			m.mcpTab = MCPTabCatalog
-			return m, nil
-		} else if m.mcpTab == MCPTabCatalog {
-			m.mcpTab = MCPTabGuide
-			return m, nil
-		} else if m.mcpTab == MCPTabGuide {
-			if m.selectedMCPCatalogIdx >= 0 && m.selectedMCPCatalogIdx < len(m.mcpCatalog) {
-				item := m.mcpCatalog[m.selectedMCPCatalogIdx]
+		if m.mcpTab == MCPTabDetails {
+			if m.mcpDetail != nil && !m.mcpDetail.IsDefault && !m.mcpDetail.Installed {
+				item := m.mcpDetail
 				m.mode = modeChat
 				m.input.Focus()
-				m.sess.AddSystem(fmt.Sprintf("✓ To install %s:\n  1. Run: %s\n  2. Add server configuration to mcp/config.json", item.DisplayName, item.InstallCmd))
+				m.sess.AddSystem(fmt.Sprintf("To install %s, run:\n  %s", item.DisplayName, item.InstallCmd))
 				return m, textinput.Blink
 			}
-			m.mcpTab = MCPTabCatalog
 			return m, nil
 		}
+		m.openMCPDetails()
+		return m, nil
 	}
 	return m, nil
+}
+
+func cycleIndex(current, length, delta int) int {
+	if length == 0 {
+		return 0
+	}
+	return (current + delta + length) % length
 }
 
 // ─── Prompt Submission ───────────────────────────────────────────────────────
@@ -1395,19 +1514,31 @@ func (m ReplModel) runSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 				if len(parts) > 2 {
 					pkg = parts[2]
 				}
-				m.sess.AddSystem(fmt.Sprintf("==> Installing MCP package '%s' into ~/.pihu/mcp/...\n✓ Fetched manifest from registry (pihu.nfks.co.in/api/v1/mcp)\n✓ Created isolated environment (uv / npm)\n✓ Health probe passed & registered in installed.json\n✔ Installed %s successfully!", pkg, pkg))
+				m.sess.AddSystem(fmt.Sprintf("To install %s, run:\n  pihu mcp install %s\nOpen /mcp and select the package to review its requirements and tools.", pkg, pkg))
 				return m, nil
 			case "search":
 				q := ""
 				if len(parts) > 2 {
 					q = parts[2]
 				}
-				m.sess.AddSystem(fmt.Sprintf("◈ Registry Search ('%s'):\n• google-workspace (v1.2.0) - Gmail, Calendar, Drive, Docs\n• sqlite (v1.0.0) - SQLite Database MCP\n• github (v1.1.0) - GitHub Integration MCP\n• spotify (v1.0.0) - Spotify Player & Search MCP\n• docker (v1.0.1) - Docker Engine MCP", q))
+				items, message := SearchLiveMCP(q)
+				var lines []string
+				lines = append(lines, fmt.Sprintf("◈ MCP Registry Search (%q)", q))
+				if message != "" {
+					lines = append(lines, message)
+				}
+				if len(items) == 0 {
+					lines = append(lines, "No matching MCP packages.")
+				}
+				for _, item := range items {
+					lines = append(lines, fmt.Sprintf("• %s (v%s) · %s · %s", item.ID, item.Version, item.Category, item.Description))
+				}
+				m.sess.AddSystem(strings.Join(lines, "\n"))
 				return m, nil
 			case "remove", "uninstall":
 				if len(parts) > 2 {
 					pkg := parts[2]
-					m.sess.AddSystem(fmt.Sprintf("==> Removed MCP package '%s' from ~/.pihu/mcp/", pkg))
+					m.sess.AddSystem(fmt.Sprintf("To remove %s, run:\n  pihu mcp remove %s", pkg, pkg))
 					return m, nil
 				}
 			case "list", "status":
@@ -1629,6 +1760,7 @@ func (m ReplModel) runSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 			} else {
 				m.provider = "ollama"
 			}
+			_ = saveModelPreference(m.provider, m.model)
 			m.sess.AddSystem(fmt.Sprintf("✓ Model → %s (%s)", m.model, m.provider))
 			return m, nil
 		}
@@ -1639,18 +1771,20 @@ func (m ReplModel) runSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 		if len(parts) > 1 {
 			m.provider = parts[1]
 			if m.provider == "gemini" {
-				m.model = "gemini-2.0-flash"
+				m.model = "gemini-3.8-flash"
 			} else {
 				m.model = "qwen3:4b"
 			}
+			_ = saveModelPreference(m.provider, m.model)
 		} else {
 			if m.provider == "gemini" {
 				m.provider = "ollama"
 				m.model = "qwen3:4b"
 			} else {
 				m.provider = "gemini"
-				m.model = "gemini-2.0-flash"
+				m.model = "gemini-3.8-flash"
 			}
+			_ = saveModelPreference(m.provider, m.model)
 		}
 		m.sess.AddSystem(fmt.Sprintf("✓ Provider → %s / %s", m.provider, m.model))
 
@@ -1816,10 +1950,13 @@ func (m ReplModel) View() string {
 	if m.mode == modeMCPMarket {
 		modal := RenderMCPRegistryModal(
 			m.mcpTab,
-			m.mcpConnected,
+			m.mcpDefault,
+			m.mcpInstalled,
 			m.mcpCatalog,
-			m.selectedMCPConnectedIdx,
-			m.selectedMCPCatalogIdx,
+			m.selectedMCPIndex(),
+			m.mcpDetail,
+			m.mcpRegistryMessage,
+			m.mcpDetailScroll,
 			m.width,
 			bodyH,
 		)
@@ -1846,13 +1983,15 @@ func (m ReplModel) viewHeader() string {
 
 	// Left brand
 	brand := lipgloss.NewStyle().Foreground(colMauve).Bold(true).Render("PIHU") +
-		"  " + lipgloss.NewStyle().Foreground(colMuted).Render("v0.1.0") +
+		"  " + lipgloss.NewStyle().Foreground(colMuted).Render("v"+version.Version) +
 		"  " + lipgloss.NewStyle().Foreground(colSubtext).Render("Think · Plan · Execute")
 
 	// Center status chips (transparent with border accents)
 	modelChip := transparentChip(colGreen, "Model", m.model)
-	mcpChip := transparentChip(colBlue, "MCP", "5 connected")
-	toolsChip := transparentChip(colSky, "Tools", "53 active")
+	activeMCPs := m.activeDashboardMCPs()
+	serverCount, toolCount := dashboardMCPStats(activeMCPs)
+	mcpChip := transparentChip(colBlue, "MCP", fmt.Sprintf("%d active", serverCount))
+	toolsChip := transparentChip(colSky, "Tools", fmt.Sprintf("%d active", toolCount))
 	statusChip := lipgloss.NewStyle().Foreground(colGreen).Bold(true).Render("● Online")
 
 	center := lipgloss.JoinHorizontal(lipgloss.Center,
@@ -1976,9 +2115,10 @@ func (m ReplModel) renderWelcomeBanner(w, h int) []string {
 		Render("Personalized Intelligent Human Utility  ·  AI IDE REPL")
 	content = append(content, tagline, "")
 
+	serverCount, toolCount := dashboardMCPStats(m.activeDashboardMCPs())
 	chips := lipgloss.NewStyle().Foreground(colMauve).Render(m.provider+"/"+m.model) +
 		lipgloss.NewStyle().Foreground(colMuted).Render("  ·  ") +
-		lipgloss.NewStyle().Foreground(colGreen).Render("5 MCP Servers (53 tools)") +
+		lipgloss.NewStyle().Foreground(colGreen).Render(fmt.Sprintf("%d MCP Servers (%d tools)", serverCount, toolCount)) +
 		lipgloss.NewStyle().Foreground(colMuted).Render("  ·  ") +
 		lipgloss.NewStyle().Foreground(colSky).Render(m.ws.Name)
 	content = append(content, lipgloss.NewStyle().Width(w).Align(lipgloss.Center).Render(chips), "")
@@ -2348,22 +2488,36 @@ func parseStepDetails(name, server string, args map[string]interface{}) (targetF
 
 // ─── Sidebar View (Transparent with Clean Sections) ──────────────────────────
 
+func (m ReplModel) activeDashboardMCPs() []CommunityMCPItem {
+	items := m.mcpInstalled
+	if items == nil {
+		items = GetInstalledMCPs(m.mcpCatalog)
+	}
+	active := make([]CommunityMCPItem, 0, len(items))
+	for _, item := range items {
+		if item.Enabled {
+			active = append(active, item)
+		}
+	}
+	return active
+}
+
+func dashboardMCPStats(items []CommunityMCPItem) (int, int) {
+	tools := 0
+	for _, item := range items {
+		tools += item.ToolCount
+	}
+	return len(items), tools
+}
+
 func (m ReplModel) viewSidebar(w, h int) string {
 	innerW := w - 2
 	var sections []string
 
-	// Compact PIHU ASCII art at top of sidebar
-	art := lipgloss.NewStyle().Foreground(colMauve).Bold(true).Render(
-		"  ____ ___ _   _ _   _\n" +
-			" |  _ \\_ _| | | | | | |\n" +
-			" | |_) | || |_| | | | |\n" +
-			" |  __/| ||  _  | |_| |\n" +
-			" |_|  |___|_| |_|\\___/",
-	)
-	subtitle := lipgloss.NewStyle().Foreground(colMuted).Render(" AI Terminal IDE v0.1.0")
+	art := lipgloss.NewStyle().Foreground(colMauve).Bold(true).Render(RenderAsciiArt())
+	subtitle := lipgloss.NewStyle().Foreground(colMuted).Render(" AI Terminal IDE v" + version.Version)
 	sections = append(sections, art, subtitle, "")
 
-	// Workspace section
 	sections = append(sections,
 		lipgloss.NewStyle().Foreground(colBlue).Bold(true).Render("◇ Workspace"),
 		lipgloss.NewStyle().Foreground(colSurf1).Render(strings.Repeat("─", innerW)),
@@ -2386,64 +2540,57 @@ func (m ReplModel) viewSidebar(w, h int) string {
 	}
 	sections = append(sections, "")
 
-	// Active MCPs section (5 connected servers)
+	activeMCPs := m.activeDashboardMCPs()
+	serverCount, _ := dashboardMCPStats(activeMCPs)
 	sections = append(sections,
-		lipgloss.NewStyle().Foreground(colGreen).Bold(true).Render("◇ Active MCPs"),
+		lipgloss.NewStyle().Foreground(colGreen).Bold(true).Render(fmt.Sprintf("◇ Active MCPs (%d)", serverCount)),
 		lipgloss.NewStyle().Foreground(colSurf1).Render(strings.Repeat("─", innerW)),
 	)
-	for _, s := range []struct {
-		name  string
-		tools string
-		c     lipgloss.Color
-	}{
-		{"pihu-file-mcp", "24", colMauve},
-		{"pihu-system-mcp", "7", colGreen},
-		{"pihu-web-search-mcp", "6", colSky},
-		{"google-workspace-mcp", "10", colYellow},
-		{"pihu-project-mcp", "6", colPeach},
-	} {
-		dot := lipgloss.NewStyle().Foreground(colGreen).Render("●")
-		sname := lipgloss.NewStyle().Foreground(colText).Render(s.name)
-		stools := lipgloss.NewStyle().Foreground(colMuted).Render(" (" + s.tools + ")")
-		sections = append(sections, fmt.Sprintf("%s %s%s", dot, sname, stools))
+	if len(activeMCPs) == 0 {
+		sections = append(sections, lipgloss.NewStyle().Foreground(colMuted).Italic(true).Render("No active MCPs"))
+	} else {
+		for _, item := range activeMCPs {
+			dot := lipgloss.NewStyle().Foreground(colGreen).Render("●")
+			name := item.ID
+			if name == "" {
+				name = item.DisplayName
+			}
+			line := dot + " " + lipgloss.NewStyle().Foreground(colText).Render(mcpFit(name, innerW-12))
+			if item.ToolCount > 0 {
+				line += lipgloss.NewStyle().Foreground(colMuted).Render(fmt.Sprintf(" (%d)", item.ToolCount))
+			}
+			sections = append(sections, line)
+		}
 	}
 	sections = append(sections, "")
 
-	// Recent Prompts
 	sections = append(sections,
 		lipgloss.NewStyle().Foreground(colMauve).Bold(true).Render("◇ Recent"),
 		lipgloss.NewStyle().Foreground(colSurf1).Render(strings.Repeat("─", innerW)),
 	)
 	recent := m.sess.RecentPrompts(4)
 	if len(recent) == 0 {
-		sections = append(sections,
-			lipgloss.NewStyle().Foreground(colMuted).Italic(true).Render("No history yet"),
-		)
+		sections = append(sections, lipgloss.NewStyle().Foreground(colMuted).Italic(true).Render("No history yet"))
 	} else {
-		for _, r := range recent {
-			sections = append(sections, lipgloss.NewStyle().Foreground(colSubtext).Render(r))
+		for _, prompt := range recent {
+			sections = append(sections, lipgloss.NewStyle().Foreground(colSubtext).Render(mcpFit(prompt, innerW-2)))
 		}
 	}
 	sections = append(sections, "")
 
-	// Quick Commands
 	sections = append(sections,
 		lipgloss.NewStyle().Foreground(colGreen).Bold(true).Render("◇ Commands"),
 		lipgloss.NewStyle().Foreground(colSurf1).Render(strings.Repeat("─", innerW)),
 	)
-	for _, kv := range [][2]string{
-		{"/help", "All commands"},
-		{"/model", "Switch model"},
-		{"/key", "Gemini tokens"},
-		{"/tools", "53 MCP tools"},
-		{"/mcp", "Server status"},
-		{"/workspace", "Project stats"},
-		{"/clear", "Clear screen"},
-		{"/exit", "Quit PIHU"},
-	} {
-		k := lipgloss.NewStyle().Foreground(colGreen).Bold(true).Width(11).Render(kv[0])
-		v := lipgloss.NewStyle().Foreground(colMuted).Render(kv[1])
-		sections = append(sections, k+v)
+	used := strings.Count(strings.Join(sections, "\n"), "\n") + 1
+	visibleCommands := min(len(SlashCommands), max(0, h-used-1))
+	for _, command := range SlashCommands[:visibleCommands] {
+		name := lipgloss.NewStyle().Foreground(colGreen).Bold(true).Width(11).Render(command.Command)
+		description := lipgloss.NewStyle().Foreground(colMuted).Render(mcpFit(command.Desc, max(4, innerW-14)))
+		sections = append(sections, name+description)
+	}
+	if visibleCommands < len(SlashCommands) && h-used > 0 {
+		sections = append(sections, lipgloss.NewStyle().Foreground(colMuted).Italic(true).Render(fmt.Sprintf("+ %d more commands", len(SlashCommands)-visibleCommands)))
 	}
 
 	content := strings.Join(sections, "\n")
@@ -2452,11 +2599,7 @@ func (m ReplModel) viewSidebar(w, h int) string {
 		content += "\n"
 	}
 
-	return lipgloss.NewStyle().
-		Width(w).
-		Height(h).
-		PaddingLeft(1).
-		Render(content)
+	return lipgloss.NewStyle().Width(w).Height(h).PaddingLeft(1).Render(content)
 }
 
 func sideRow(label, value string) string {
@@ -2484,8 +2627,8 @@ func (m ReplModel) viewInput() string {
 		borderCol = colSurf1
 	}
 
-	// Left input box
-	inputW := w - 34
+	// Use the full footer width for the prompt; keyboard hints live in command help.
+	inputW := w - 4
 	if inputW < 30 {
 		inputW = 30
 	}
@@ -2507,39 +2650,13 @@ func (m ReplModel) viewInput() string {
 		Padding(0, 1).
 		Render(inputLine)
 
-	// Right status / shortcuts box
-	hintW := w - inputW - 3
-	if hintW < 24 {
-		hintW = 24
-	}
-
-	var hintContent string
-	if m.isBusy {
-		elapsed := time.Since(m.turnStartTime).Seconds()
-		hintContent = m.spinner.View() + " " + lipgloss.NewStyle().Foreground(colMauve).Render(fmt.Sprintf("Working... %.1fs", elapsed))
-	} else if isFocused {
-		hintContent = lipgloss.NewStyle().Foreground(colMuted).Render("Esc Unfocus   Enter Send\n^K Palette    /key Tokens\n@ File Mention")
-	} else {
-		hintContent = lipgloss.NewStyle().Foreground(colSubtext).Render("i Focus Chat   j/k Scroll\n/ Commands     ^K Palette")
-	}
-
-	hintBox := lipgloss.NewStyle().
-		Width(hintW).
-		Height(inputH).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderCol).
-		Padding(0, 1).
-		Render(hintContent)
-
-	inputRow := lipgloss.JoinHorizontal(lipgloss.Top, inputBox, " ", hintBox)
-
 	// Render interactive suggestion box on top of input if suggestions active
 	if len(m.suggestions) > 0 && isFocused && strings.HasPrefix(m.input.Value(), "/") {
 		sugBox := RenderSuggestionBox(m.suggestions, m.selectedSugIdx, inputW)
-		return lipgloss.JoinVertical(lipgloss.Left, sugBox, inputRow)
+		return lipgloss.JoinVertical(lipgloss.Left, sugBox, inputBox)
 	}
 
-	return inputRow
+	return inputBox
 }
 
 // ─── Palette Modal Renderer ──────────────────────────────────────────────────
@@ -2547,17 +2664,9 @@ func (m ReplModel) viewInput() string {
 func renderPaletteBox(inputView string) string {
 	palW := 48
 
-	commands := []string{
-		"  › Ask PIHU (type your prompt)",
-		"  › /model     Dynamic model selector",
-		"  › /key       View / add Gemini tokens",
-		"  › /tools     List 53 MCP tools",
-		"  › /mcp       Show server health",
-		"  › /provider  Toggle gemini / ollama",
-		"  › /workspace Project detector info",
-		"  › /clear     Clear conversation",
-		"  › /help      Command reference",
-		"  › /exit      Quit PIHU",
+	commands := []string{"  › Ask PIHU (type your prompt)"}
+	for _, command := range SlashCommands {
+		commands = append(commands, fmt.Sprintf("  › %-12s %s", command.Command, mcpFit(command.Desc, palW-20)))
 	}
 
 	body := inputView + "\n" + strings.Repeat("─", palW-4) + "\n" + strings.Join(commands, "\n")
@@ -2575,89 +2684,112 @@ func renderPaletteBox(inputView string) string {
 // ─── Slash Command Content ───────────────────────────────────────────────────
 
 func helpMsg() string {
-	cmds := [][2]string{
-		{"/model", "Dynamic model selector (Gemini Cloud + Ollama Local)"},
-		{"/key <token>", "View or configure Gemini API tokens"},
-		{"/tools", "List all 53 available MCP tools"},
-		{"/mcp", "Show connected MCP servers and status"},
-		{"/provider", "Toggle between ollama and gemini"},
-		{"/workspace", "Show workspace metadata & git status"},
-		{"/clear", "Clear conversation screen"},
-		{"/help", "Show this help"},
-		{"/exit", "Exit PIHU"},
-	}
 	var rows []string
 	rows = append(rows, lipgloss.NewStyle().Foreground(colMauve).Bold(true).Render("PIHU Commands\n"))
 	rows = append(rows, lipgloss.NewStyle().Foreground(colSurf1).Render(strings.Repeat("─", 50)))
-	for _, c := range cmds {
-		k := lipgloss.NewStyle().Foreground(colGreen).Bold(true).Width(16).Render(c[0])
-		v := lipgloss.NewStyle().Foreground(colSubtext).Render(c[1])
+	for _, command := range SlashCommands {
+		name := command.Syntax
+		if name == "" {
+			name = command.Command
+		}
+		k := lipgloss.NewStyle().Foreground(colGreen).Bold(true).Width(22).Render(name)
+		v := lipgloss.NewStyle().Foreground(colSubtext).Render(command.Desc)
 		rows = append(rows, k+v)
 	}
 	rows = append(rows, "")
 	rows = append(rows, lipgloss.NewStyle().Foreground(colMuted).Render(
 		"Shortcuts: PageUp/PageDown Scroll · Ctrl+K Palette · Ctrl+L Clear",
 	))
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colMauve).
-		Padding(1, 2).
-		Render(strings.Join(rows, "\n"))
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colMauve).Padding(1, 2).Render(strings.Join(rows, "\n"))
 }
 
 func mcpMsg() string {
+	catalog, message := FetchLiveMCPCatalog()
+	defaults := GetDefaultMCPs(catalog)
+	installed := GetInstalledMCPs(catalog)
 	rows := []string{
-		lipgloss.NewStyle().Foreground(colGreen).Bold(true).Render("MCP Servers  (5 online)\n"),
+		lipgloss.NewStyle().Foreground(colGreen).Bold(true).Render("MCP Inventory\n"),
 		lipgloss.NewStyle().Foreground(colSurf1).Render(strings.Repeat("─", 50)),
 	}
-	for _, s := range []struct{ name, transport, tools string }{
-		{"pihu-file-mcp", "stdio · python", "24"},
-		{"pihu-system-mcp", "stdio · python", "7"},
-		{"pihu-web-search-mcp", "stdio · python", "6"},
-		{"google-workspace-mcp", "stdio · python", "10"},
-		{"pihu-project-mcp", "stdio · node", "6"},
-	} {
+	if message != "" {
+		rows = append(rows, lipgloss.NewStyle().Foreground(colYellow).Render(message))
+	}
+	appendItem := func(item CommunityMCPItem, label string) {
 		dot := lipgloss.NewStyle().Foreground(colGreen).Render("●")
-		name := lipgloss.NewStyle().Foreground(colText).Width(22).Render(s.name)
-		trans := lipgloss.NewStyle().Foreground(colMuted).Width(16).Render(s.transport)
-		tools := lipgloss.NewStyle().Foreground(colBlue).Render(s.tools + " tools")
-		rows = append(rows, dot+" "+name+trans+tools)
+		name := lipgloss.NewStyle().Foreground(colText).Width(24).Render(item.DisplayName)
+		version := item.Version
+		if version == "" {
+			version = "version unavailable"
+		} else {
+			version = "v" + version
+		}
+		tools := item.ToolCount
+		if tools == 0 {
+			tools = len(item.Tools)
+		}
+		meta := lipgloss.NewStyle().Foreground(colMuted).Render(fmt.Sprintf("%s · %s · %d tools", label, version, tools))
+		rows = append(rows, dot+" "+name+meta)
+	}
+	for _, item := range defaults {
+		appendItem(item, "Default")
+	}
+	for _, item := range installed {
+		if item.IsDefault {
+			continue
+		}
+		appendItem(item, "Installed")
+	}
+	if len(defaults)+len(installed) == 0 {
+		rows = append(rows, lipgloss.NewStyle().Foreground(colMuted).Render("No default or installed MCP packages were found."))
 	}
 	rows = append(rows, "")
-	rows = append(rows, lipgloss.NewStyle().Foreground(colMuted).Render("Total: 5 servers · 53 tools"))
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colGreen).
-		Padding(1, 2).
-		Render(strings.Join(rows, "\n"))
+	rows = append(rows, lipgloss.NewStyle().Foreground(colMuted).Render(fmt.Sprintf("Total: %d default · %d installed · %d catalog", len(defaults), len(installed), len(catalog))))
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colGreen).Padding(1, 2).Render(strings.Join(rows, "\n"))
 }
 
 func toolsMsg() string {
+	catalog, message := FetchLiveMCPCatalog()
+	items := GetInstalledMCPs(catalog)
+	active := make([]CommunityMCPItem, 0, len(items))
+	for _, item := range items {
+		if !item.Enabled {
+			continue
+		}
+		if len(item.Tools) == 0 {
+			item = FetchMCPManifest(item)
+		}
+		active = append(active, item)
+	}
+	serverCount, toolCount := dashboardMCPStats(active)
 	rows := []string{
-		lipgloss.NewStyle().Foreground(colBlue).Bold(true).Render("MCP Tools  (53 available)\n"),
+		lipgloss.NewStyle().Foreground(colBlue).Bold(true).Render(fmt.Sprintf("MCP Tools  (%d available · %d servers)\n", toolCount, serverCount)),
 		lipgloss.NewStyle().Foreground(colSurf1).Render(strings.Repeat("─", 50)),
 	}
-	for _, g := range []struct {
-		c    lipgloss.Color
-		icon string
-		name string
-		list string
-	}{
-		{colMauve, "◈", "pihu-file-mcp (24)", "read_file · write_file · search_files · tree · grep_search · replace_text …"},
-		{colGreen, "◇", "pihu-system-mcp (7)", "get_system_info · run_shell · list_processes · send_notification …"},
-		{colSky, "›", "pihu-web-search-mcp (6)", "web_search · web_fetch · web_search_and_read · web_download_file …"},
-		{colYellow, "§", "google-workspace-mcp (10)", "gmail_search · gmail_send · calendar_list · drive_search · docs_create …"},
-		{colPeach, "▲", "pihu-project-mcp (6)", "scaffold_project · test_project · diagnose_and_fix · manage_server …"},
-	} {
-		rows = append(rows, "")
-		rows = append(rows, lipgloss.NewStyle().Foreground(g.c).Bold(true).Render(g.icon+" "+g.name))
-		rows = append(rows, lipgloss.NewStyle().Foreground(colMuted).PaddingLeft(2).Render(g.list))
+	if message != "" {
+		rows = append(rows, lipgloss.NewStyle().Foreground(colYellow).Render(message))
 	}
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colBlue).
-		Padding(1, 2).
-		Render(strings.Join(rows, "\n"))
+	for _, item := range active {
+		count := item.ToolCount
+		if count == 0 {
+			count = len(item.Tools)
+		}
+		name := item.ID
+		if name == "" {
+			name = item.DisplayName
+		}
+		rows = append(rows, "", lipgloss.NewStyle().Foreground(colGreen).Bold(true).Render(fmt.Sprintf("● %s (%d)", name, count)))
+		toolNames := make([]string, 0, min(8, len(item.Tools)))
+		for _, tool := range item.Tools[:min(8, len(item.Tools))] {
+			toolNames = append(toolNames, tool.Name)
+		}
+		if len(toolNames) > 0 {
+			rows = append(rows, lipgloss.NewStyle().Foreground(colMuted).PaddingLeft(2).Render(strings.Join(toolNames, " · ")))
+		}
+	}
+	if len(active) == 0 {
+		rows = append(rows, lipgloss.NewStyle().Foreground(colMuted).Render("No active MCP servers are configured."))
+	}
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colBlue).Padding(1, 2).Render(strings.Join(rows, "\n"))
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

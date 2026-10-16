@@ -8,6 +8,7 @@ import shutil
 import hashlib
 import json
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
 
@@ -15,6 +16,7 @@ from pihu.mcp.manifest import MCPPackageManifest, MCPRuntimeType
 from pihu.mcp.registry import MCPRegistryClient
 from pihu.mcp.resolver import MCPResolver
 from pihu.mcp.health import MCPHealthProbe
+from pihu.mcp.package_store import PackageStore
 from pihu.mcp.runtimes.python import PythonMCPRuntimeHandler
 from pihu.mcp.runtimes.node import NodeMCPRuntimeHandler
 from pihu.mcp.runtimes.binary import BinaryMCPRuntimeHandler, RemoteMCPRuntimeHandler
@@ -24,9 +26,10 @@ class MCPInstaller:
     """Atomic MCP Package Installer executing transactional server installs."""
 
     def __init__(self, pihu_mcp_dir: Optional[Path] = None, registry_client: Optional[MCPRegistryClient] = None):
-        self.base_dir = pihu_mcp_dir or (Path.home() / ".pihu" / "mcp")
-        self.servers_dir = self.base_dir / "servers"
-        self.installed_json_path = self.base_dir / "installed.json"
+        self.package_store = PackageStore()
+        self.base_dir = pihu_mcp_dir or self.package_store.packages_dir
+        self.servers_dir = self.base_dir / "mcps" if pihu_mcp_dir else self.package_store.mcps_dir
+        self.installed_json_path = self.package_store.state_path
         self.registry_client = registry_client or MCPRegistryClient()
 
         # Ensure base directories exist
@@ -41,7 +44,7 @@ class MCPInstaller:
         2. Validate manifest schema
         3. Create temporary sandbox directory
         4. Execute runtime installer (uv / npm)
-        5. Verify checksum (if declared)
+        5. Verify declared package metadata
         6. Probe server health & discover tools
         7. Atomic commit to ~/.pihu/mcp/installed.json
         8. Rollback sandbox if any step fails
@@ -77,11 +80,8 @@ class MCPInstaller:
             handler = self._get_runtime_handler(manifest.runtime)
             exec_params = await handler.install(manifest, temp_dir)
 
-            # Step 4: Verify SHA256 Checksum if provided
             if manifest.installation.checksum_sha256:
-                _log("Verifying artifact SHA-256 checksum...")
-                # Verify package directory checksum
-                pass
+                raise RuntimeError("This source installer cannot verify a package checksum; the package was not installed.")
 
             # Step 5: Save manifest into server folder
             (temp_dir / "manifest.json").write_text(json.dumps(manifest.to_dict(), indent=2))
@@ -95,12 +95,14 @@ class MCPInstaller:
                 env = exec_params.get("env", os.environ.copy())
 
                 healthy, probe_tools, probe_msg = await MCPHealthProbe.probe_stdio_server(command, args, env)
-                if healthy and probe_tools:
+                if not healthy:
+                    raise RuntimeError(f"MCP health check failed: {probe_msg}")
+                if probe_tools:
                     tools_discovered = probe_tools
-                    _log(f"Health check passed! {len(tools_discovered)} tools discovered.")
+                _log(f"Health check passed! {len(tools_discovered)} tools discovered.")
 
-            # Step 7: Atomic Commit (Move temp_dir to target_dir & update installed.json)
-            _log("Registering MCP in ~/.pihu/mcp/installed.json...")
+            # Step 7: Atomic Commit (Move temp_dir to the shared package directory).
+            _log("Registering MCP in the shared PIHU package inventory...")
             if target_dir.exists():
                 shutil.rmtree(target_dir, ignore_errors=True)
             temp_dir.rename(target_dir)
@@ -112,17 +114,21 @@ class MCPInstaller:
                 "runtime": str(manifest.runtime),
                 "transport": str(manifest.transport),
                 "enabled": True,
-                "command": exec_params.get("command"),
-                "args": exec_params.get("args", []),
+                "command": str(exec_params.get("command", "")).replace(str(temp_dir), str(target_dir)),
+                "args": [str(arg).replace(str(temp_dir), str(target_dir)) for arg in exec_params.get("args", [])],
                 "env": exec_params.get("env", {}),
                 "endpoint": exec_params.get("endpoint"),
                 "tools": tools_discovered,
-                "installed_at": str(asyncio.get_event_loop().time())
+                "installed_at": datetime.now(timezone.utc).isoformat(),
+                "install_path": str(target_dir),
+                "display_name": manifest.display_name or manifest.name,
+                "description": manifest.description,
+                "author": manifest.author,
+                "tool_definitions": manifest.tool_definitions,
+                "manifest": manifest.to_dict(),
             }
 
-            installed_data = self._read_installed_manifest()
-            installed_data.setdefault("servers", {})[manifest.id] = server_record
-            self._write_installed_manifest(installed_data)
+            self.package_store.record(server_record, "mcp")
 
             _log(f"Successfully installed {manifest.id}@{manifest.version}!")
             return True, f"Installed {manifest.id}@{manifest.version} with {len(tools_discovered)} tools.", server_record
@@ -135,16 +141,15 @@ class MCPInstaller:
 
     async def uninstall(self, mcp_id: str) -> Tuple[bool, str]:
         """Removes an installed MCP server and cleans up its directory."""
-        installed_data = self._read_installed_manifest()
-        servers = installed_data.get("servers", {})
-
-        if mcp_id not in servers:
+        record = next((item for item in self.package_store.list("mcp") if item.get("id") == mcp_id), None)
+        if record is None:
             return False, f"MCP '{mcp_id}' is not installed."
 
-        del servers[mcp_id]
-        self._write_installed_manifest(installed_data)
-
-        target_dir = self.servers_dir / mcp_id
+        self.package_store.remove(mcp_id)
+        target_dir = Path(record.get("install_path", self.servers_dir / mcp_id))
+        if not target_dir.exists():
+            # Remove packages installed by the pre-market MCP installer.
+            target_dir = Path.home() / ".pihu" / "mcp" / "servers" / mcp_id
         if target_dir.exists():
             shutil.rmtree(target_dir, ignore_errors=True)
 
@@ -162,12 +167,7 @@ class MCPInstaller:
         return PythonMCPRuntimeHandler()
 
     def _read_installed_manifest(self) -> Dict[str, Any]:
-        if self.installed_json_path.exists():
-            try:
-                return json.loads(self.installed_json_path.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-        return {"servers": {}}
+        return self.package_store.read()
 
     def _write_installed_manifest(self, data: Dict[str, Any]) -> None:
-        self.installed_json_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        self.package_store.write(data)

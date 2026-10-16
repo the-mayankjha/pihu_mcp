@@ -1,192 +1,256 @@
-import sys
-import os
-import json
-import ssl
+"""Local desktop callback for the PIHU-hosted Google OAuth broker."""
 import base64
 import html
+import json
+import os
 import re
-from pathlib import Path
-import subprocess
+import secrets
+import ssl
+import urllib.error
 import urllib.parse
 import urllib.request
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 
-def render_callback_page(success, user_name='', user_email=''):
+BROKER = os.environ.get("PIHU_OAUTH_BROKER", "https://pihu.nfks.co.in/api/v2/oauth/google")
+TOKEN_PATH = Path.home() / ".gemini/antigravity/google_workspace_tokens.json"
+GOOGLE_SCOPES = [
+    "openid", "email", "profile",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/documents",
+    "https://www.googleapis.com/auth/tasks",
+]
+
+
+def local_credentials():
+    """Read an optional user-provided OAuth client for the offline broker fallback."""
+    candidates = [
+        Path.home() / ".gworkspace-mcp/credentials.json",
+        Path.home() / ".config/google-workspace-mcp/credentials.json",
+        Path.home() / ".pihu-os/config.json",
+        TOKEN_PATH,
+    ]
+    for path in candidates:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        sections = [data, data.get("installed", {}), data.get("web", {}), data.get("google_oauth", {})]
+        for item in sections:
+            if not isinstance(item, dict):
+                continue
+            client_id = item.get("client_id")
+            client_secret = item.get("client_secret")
+            if (isinstance(client_id, str) and client_id.endswith(".apps.googleusercontent.com")
+                    and isinstance(client_secret, str) and client_secret
+                    and not client_secret.startswith("${")):
+                return client_id, client_secret
+    raise RuntimeError(
+        "The PIHU sign-in service is unavailable (HTTP 503), and no local Google OAuth client is configured. "
+        "Configure GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET with `pihu setup`, then retry."
+    )
+
+
+def exchange_local_code(code, client_id, client_secret, callback):
+    body = urllib.parse.urlencode({
+        "code": code,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": callback,
+        "grant_type": "authorization_code",
+    }).encode("ascii")
+    request = urllib.request.Request(
+        "https://oauth2.googleapis.com/token", data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(request, context=ssl.create_default_context(), timeout=20) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def render_callback_page(success, user_name="", user_email=""):
     resources = Path(__file__).resolve().parent
-    template = (resources / 'google_oauth_page.html').read_text(encoding='utf-8')
-    logo = base64.b64encode((resources / 'pihu-logo.png').read_bytes()).decode('ascii')
+    template = (resources / "google_oauth_page.html").read_text(encoding="utf-8")
+    logo = base64.b64encode((resources / "pihu-logo.png").read_bytes()).decode("ascii")
     values = {
-        '__TITLE__': "You're connected." if success else "Connection incomplete.",
-        '__MESSAGE__': 'Your Google account has been linked to PIHU.' if success else 'Google could not complete the connection. Return to PIHU and try linking your account again.',
-        '__ACCOUNT_NAME__': html.escape(user_name),
-        '__ACCOUNT_EMAIL__': html.escape(user_email),
-        '__ACCOUNT_HIDDEN__': '' if success and (user_name or user_email) else 'hidden',
-        '__RETURN__': 'You can close this tab and return to PIHU.' if success else 'You can close this tab. Your existing connections remain unchanged.',
-        '__LOGO__': 'data:image/png;base64,' + logo,
+        "__TITLE__": "You're connected." if success else "Connection incomplete.",
+        "__EYEBROW__": "Connecting to Google" if success else "Google Workspace sign-in",
+        "__MESSAGE__": "Your Google account is linked. PIHU is ready to use your Google Workspace tools." if success else "Google could not complete the connection. Return to PIHU and try linking your account again.",
+        "__ACCOUNT_NAME__": html.escape(user_name),
+        "__ACCOUNT_EMAIL__": html.escape(user_email),
+        "__ACCOUNT_HIDDEN__": "" if success and (user_name or user_email) else "hidden",
+        "__STEPS_HIDDEN__": "" if success else "hidden",
+        "__PRIVACY_HIDDEN__": "" if success else "hidden",
+        "__APP_HIDDEN__": "" if success else "hidden",
+        "__HINT_HIDDEN__": "" if success else "hidden",
+        "__ERROR_HIDDEN__": "hidden" if success else "",
+        "__ERROR__": "Google sign-in could not be completed. Return to PIHU and try again.",
+        "__LOGO__": "data:image/png;base64," + logo,
     }
-    # Substitute once so account text cannot introduce template tokens or HTML.
-    return re.sub(r'__[A-Z_]+__', lambda match: values.get(match.group(), ''), template)
+    return re.sub(r"__[A-Z_]+__", lambda match: values.get(match.group(), ""), template)
 
 
-class OAuthCallbackHandler(BaseHTTPRequestHandler):
-    client_id = ""
-    client_secret = ""
-    token_save_path = os.path.expanduser("~/.gemini/antigravity/google_workspace_tokens.json")
+def request_json(url, data=None):
+    body = json.dumps(data).encode() if data is not None else None
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json", "Accept": "application/json"})
+    with urllib.request.urlopen(req, context=ssl.create_default_context(), timeout=20) as response:
+        return json.loads(response.read().decode("utf-8"))
 
-    def send_callback_page(self, status, success, user_name='', user_email=''):
-        page = render_callback_page(success, user_name, user_email).encode('utf-8')
-        self.send_response(status)
-        self.send_header('Content-Type', 'text/html; charset=utf-8')
-        self.send_header('Cache-Control', 'no-store')
-        self.send_header('Referrer-Policy', 'no-referrer')
-        self.send_header('Content-Length', str(len(page)))
+
+def save_account(tokens):
+    access_token = tokens.get("access_token")
+    if not access_token:
+        raise RuntimeError("PIHU did not return a Google access token.")
+    req = urllib.request.Request("https://openidconnect.googleapis.com/v1/userinfo", headers={"Authorization": f"Bearer {access_token}"})
+    with urllib.request.urlopen(req, context=ssl.create_default_context(), timeout=10) as response:
+        user = json.loads(response.read().decode("utf-8"))
+    email = user.get("email")
+    if not email:
+        raise RuntimeError("Google did not return the signed-in account email.")
+    display_name = user.get("name") or email.split("@")[0]
+    existing = {}
+    try:
+        existing = json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        pass
+    accounts = [item for item in existing.get("accounts", []) if item.get("email", "").lower() != email.lower()]
+    account = {
+        "email": email, "name": display_name, "picture": user.get("picture", ""),
+        "access_token": access_token, "refresh_token": tokens.get("refresh_token") or existing.get("refresh_token"),
+        "token_type": tokens.get("token_type", "Bearer"), "scope": tokens.get("scope"),
+        "expires_in": tokens.get("expires_in"), "is_primary": not accounts, "connected_at": email,
+    }
+    accounts.append(account)
+    data = {"access_token": access_token, "refresh_token": account["refresh_token"], "current_user": account, "accounts": accounts}
+    if tokens.get("client_id") and tokens.get("client_secret"):
+        data["client_id"] = tokens["client_id"]
+        data["client_secret"] = tokens["client_secret"]
+    TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+    TOKEN_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    TOKEN_PATH.chmod(0o600)
+    return account
+
+
+class Callback(HTTPServer):
+    allow_reuse_address = True
+
+
+class Handler(BaseHTTPRequestHandler):
+    expected_state = ""
+    callback_result = None
+    broker_url = BROKER
+    local_client = None
+    callback_url = ""
+
+    def log_message(self, *_args):
+        return
+
+    def respond_page(self, success, name="", email=""):
+        page = render_callback_page(success, name, email).encode("utf-8")
+        self.send_response(200 if success else 400)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Content-Length", str(len(page)))
         self.end_headers()
         self.wfile.write(page)
 
-    def fetch_user_info(self, access_token):
-        userinfo_url = "https://www.googleapis.com/oauth2/v2/userinfo"
-        headers = {"Authorization": f"Bearer {access_token}"}
-        
-        # Try urllib
-        try:
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            req = urllib.request.Request(userinfo_url, headers=headers)
-            with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except Exception:
-            # Fallback to curl
-            try:
-                curl_cmd = ["curl", "-s", "-H", f"Authorization: Bearer {access_token}", userinfo_url]
-                res = subprocess.run(curl_cmd, capture_output=True, text=True, check=True)
-                return json.loads(res.stdout)
-            except Exception:
-                return {}
-
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
-        if parsed.path == "/oauth2callback":
-            query = urllib.parse.parse_qs(parsed.query)
-            code = query.get("code", [None])[0]
-            if code:
-                token_url = "https://oauth2.googleapis.com/token"
-                post_data = {
-                    "code": code,
-                    "client_id": OAuthCallbackHandler.client_id,
-                    "client_secret": OAuthCallbackHandler.client_secret,
-                    "redirect_uri": "http://localhost:8080/oauth2callback",
-                    "grant_type": "authorization_code"
-                }
-
-                token_resp = None
-
-                # Attempt 1: Standard urllib
-                try:
-                    ctx = ssl.create_default_context()
-                    ctx.check_hostname = False
-                    ctx.verify_mode = ssl.CERT_NONE
-                    encoded_data = urllib.parse.urlencode(post_data).encode("utf-8")
-                    req = urllib.request.Request(
-                        token_url,
-                        data=encoded_data,
-                        headers={"Content-Type": "application/x-www-form-urlencoded"}
-                    )
-                    with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
-                        token_resp = json.loads(resp.read().decode("utf-8"))
-                except Exception as e1:
-                    print(f"urllib exchange failed ({e1}), trying curl fallback...", file=sys.stderr)
-                    # Attempt 2: System curl fallback
-                    try:
-                        curl_cmd = [
-                            "curl", "-s", "-X", "POST", token_url,
-                            "-d", f"code={urllib.parse.quote(code)}",
-                            "-d", f"client_id={urllib.parse.quote(OAuthCallbackHandler.client_id)}",
-                            "-d", f"client_secret={urllib.parse.quote(OAuthCallbackHandler.client_secret)}",
-                            "-d", "redirect_uri=http://localhost:8080/oauth2callback",
-                            "-d", "grant_type=authorization_code"
-                        ]
-                        res = subprocess.run(curl_cmd, capture_output=True, text=True, check=True)
-                        token_resp = json.loads(res.stdout)
-                    except Exception as e2:
-                        err_msg = f"OAuth Token Exchange failed: {str(e2)}"
-                        print(err_msg, file=sys.stderr)
-                        self.send_callback_page(500, False)
-                        sys.exit(1)
-
-                if token_resp and ("access_token" in token_resp or "refresh_token" in token_resp):
-                    access_token = token_resp.get("access_token", "")
-                    user_info = self.fetch_user_info(access_token) if access_token else {}
-
-                    user_email = user_info.get("email", "connected.user@google.com")
-                    user_name = user_info.get("name", user_email.split("@")[0].capitalize())
-                    user_picture = user_info.get("picture", "")
-
-                    # Read existing multi-account token storage if exists
-                    existing_data = {}
-                    if os.path.exists(OAuthCallbackHandler.token_save_path):
-                        try:
-                            with open(OAuthCallbackHandler.token_save_path, "r") as f:
-                                existing_data = json.load(f)
-                        except Exception:
-                            existing_data = {}
-
-                    accounts = existing_data.get("accounts", [])
-                    # Remove any existing entry for this email to update it
-                    accounts = [a for a in accounts if a.get("email", "").lower() != user_email.lower()]
-
-                    account_entry = {
-                        "email": user_email,
-                        "name": user_name,
-                        "picture": user_picture,
-                        "access_token": token_resp.get("access_token"),
-                        "refresh_token": token_resp.get("refresh_token", existing_data.get("refresh_token")),
-                        "token_type": token_resp.get("token_type", "Bearer"),
-                        "scope": token_resp.get("scope"),
-                        "expires_in": token_resp.get("expires_in"),
-                        "is_primary": len(accounts) == 0,
-                        "connected_at": urllib.parse.quote(user_email)
-                    }
-                    accounts.append(account_entry)
-
-                    full_token_storage = {
-                        "client_id": OAuthCallbackHandler.client_id,
-                        "client_secret": OAuthCallbackHandler.client_secret,
-                        "access_token": token_resp.get("access_token"),
-                        "refresh_token": token_resp.get("refresh_token", existing_data.get("refresh_token")),
-                        "current_user": account_entry,
-                        "accounts": accounts
-                    }
-
-                    os.makedirs(os.path.dirname(OAuthCallbackHandler.token_save_path), exist_ok=True)
-                    with open(OAuthCallbackHandler.token_save_path, "w") as f:
-                        json.dump(full_token_storage, f, indent=2)
-
-                    self.send_callback_page(200, True, user_name, user_email)
-
-                    account_json = json.dumps({"email": user_email, "name": user_name, "picture": user_picture})
-                    print(f"OAUTH_ACCOUNT_CONNECTED:{account_json}")
-                    sys.stdout.flush()
-                    sys.exit(0)
-                else:
-                    self.send_callback_page(400, False)
-                    sys.exit(1)
+        query = urllib.parse.parse_qs(parsed.query)
+        if parsed.path != "/oauth2callback" or not secrets.compare_digest(query.get("state", [""])[0], self.expected_state):
+            self.respond_page(False)
+            return
+        if query.get("error"):
+            Handler.callback_result = {"error": query["error"][0]}
+            self.respond_page(False)
+            return
+        code, broker_state = query.get("code", [""])[0], query.get("broker_state", [""])[0]
+        if not code:
+            Handler.callback_result = {"error": "The PIHU OAuth callback was incomplete."}
+            self.respond_page(False)
+            return
+        try:
+            if broker_state:
+                tokens = request_json(f"{Handler.broker_url}/exchange", {"code": code, "broker_state": broker_state})
+            elif Handler.local_client:
+                tokens = exchange_local_code(code, *Handler.local_client, Handler.callback_url)
+                tokens["client_id"], tokens["client_secret"] = Handler.local_client
             else:
-                self.send_callback_page(400, False)
-        else:
-            self.send_response(404)
+                raise RuntimeError("No OAuth exchange method is available.")
+            account = save_account(tokens)
+            Handler.callback_result = {"account": {"name": account["name"], "email": account["email"], "picture": account["picture"]}}
+            # Only redirect to the hosted completion view after the callback
+            # has exchanged tokens and persisted the account on this device.
+            self.send_response(303)
+            self.send_header("Location", "https://pihu.nfks.co.in/mcp/google/auth?status=connected")
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
+        except Exception as error:
+            Handler.callback_result = {"error": str(error)}
+            self.respond_page(False)
+
 
 def run_server():
-    if len(sys.argv) > 2:
-        OAuthCallbackHandler.client_id = sys.argv[1]
-        OAuthCallbackHandler.client_secret = sys.argv[2]
-    
-    server_address = ('', 8080)
-    httpd = HTTPServer(server_address, OAuthCallbackHandler)
-    print("OAUTH_SERVER_STARTED_PORT_8080")
-    sys.stdout.flush()
-    httpd.serve_forever()
+    Handler.expected_state = secrets.token_urlsafe(32)
+    Handler.callback_result = None
+    server = Callback(("127.0.0.1", 0), Handler)
+    port = server.server_address[1]
+    callback = f"http://127.0.0.1:{port}/oauth2callback"
+    Handler.callback_url = callback
+    Handler.broker_url = BROKER
+    query = urllib.parse.urlencode({"callback": callback, "state": Handler.expected_state})
+    provider = "pihu"
+    try:
+        auth = request_json(f"{BROKER}/start?{query}")
+        if not isinstance(auth.get("auth_url"), str) or not auth["auth_url"].startswith("https://accounts.google.com/"):
+            raise RuntimeError(auth.get("error", "PIHU did not return a Google sign-in URL."))
+    except Exception as error:
+        try:
+            Handler.local_client = local_credentials()
+            provider = "local"
+            local_query = urllib.parse.urlencode({
+                "client_id": Handler.local_client[0],
+                "redirect_uri": callback,
+                "response_type": "code",
+                "scope": " ".join(GOOGLE_SCOPES),
+                "access_type": "offline",
+                "prompt": "consent",
+                "state": Handler.expected_state,
+            })
+            auth = {"auth_url": "https://accounts.google.com/o/oauth2/v2/auth?" + local_query}
+        except Exception as fallback_error:
+            server.server_close()
+            print(json.dumps({"error": str(fallback_error), "hosted_error": str(error)}), flush=True)
+            raise SystemExit(1)
+    auth_page = os.environ.get("PIHU_OAUTH_AUTH_PAGE", "https://pihu.nfks.co.in/mcp/google/auth")
+    page_query = urllib.parse.urlencode({
+        "callback": callback,
+        "state": Handler.expected_state,
+        "auth_url": auth["auth_url"],
+    })
+    print(json.dumps({
+        "auth_url": auth["auth_url"],
+        "auth_page_url": f"{auth_page}?{page_query}",
+        "callback": callback,
+        "state": Handler.expected_state,
+        "port": port,
+        "provider": provider,
+    }), flush=True)
+    server.timeout = 1
+    import time
+    deadline = time.monotonic() + 300
+    while Handler.callback_result is None and time.monotonic() < deadline:
+        server.handle_request()
+    server.server_close()
+    if Handler.callback_result and "account" in Handler.callback_result:
+        print("OAUTH_ACCOUNT_CONNECTED:" + json.dumps(Handler.callback_result["account"]), flush=True)
+    elif Handler.callback_result:
+        print("OAUTH_ACCOUNT_ERROR:" + Handler.callback_result.get("error", "Sign-in failed"), flush=True)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     run_server()

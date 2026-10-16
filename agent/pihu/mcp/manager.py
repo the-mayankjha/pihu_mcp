@@ -13,6 +13,9 @@ from pihu.events.types import AgentEvent, EventType
 
 def resolve_mcp_servers_dir() -> Path:
     """Find the directory containing built-in MCP server scripts."""
+    configured = os.getenv("PIHU_MCP_SERVERS_DIR")
+    if configured and (Path(configured) / "pihu_file_mcp.py").exists():
+        return Path(configured)
     candidates = [
         Path(__file__).resolve().parent / "servers",
         Path(__file__).resolve().parent.parent.parent.parent / "mcp" / "servers",
@@ -136,37 +139,45 @@ class MCPManager:
 
     def __init__(self, config_path: Optional[Path] = None):
         self.config_path = resolve_mcp_config_path(config_path)
+        self.installer = None
         self.sessions: Dict[str, MCPServerSession] = {}
         self.tool_map: Dict[str, Tuple[str, str]] = {}  # namespaced_name -> (server_name, original_tool_name)
         self.tools: List[ToolDefinition] = []
 
     async def load_and_initialize(self) -> List[ToolDefinition]:
-        if not self.config_path.exists():
+        servers_config: Dict[str, Any] = {}
+        if self.config_path.exists():
+            try:
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    config_data = json.load(f)
+                configured_servers = config_data.get("servers", {})
+                if isinstance(configured_servers, dict):
+                    servers_config.update(configured_servers)
+            except Exception as e:
+                await bus.emit(
+                    AgentEvent(
+                        type=EventType.ERROR,
+                        component="mcp_manager",
+                        status="error",
+                        message=f"Failed to read MCP config: {str(e)}"
+                    )
+                )
+        else:
             await bus.emit(
                 AgentEvent(
                     type=EventType.TOOL_DISCOVERED,
                     component="mcp_manager",
                     status="warning",
-                    message=f"MCP configuration file not found at {self.config_path}",
+                    message=f"MCP configuration file not found at {self.config_path}; loading installed packages",
                 )
             )
-            return []
 
-        try:
-            with open(self.config_path, "r", encoding="utf-8") as f:
-                config_data = json.load(f)
-        except Exception as e:
-            await bus.emit(
-                AgentEvent(
-                    type=EventType.ERROR,
-                    component="mcp_manager",
-                    status="error",
-                    message=f"Failed to read MCP config: {str(e)}"
-                )
-            )
-            return []
-
-        servers_config = config_data.get("servers", {})
+        # Installed MCP packages are shared with the desktop app and CLI through
+        # ~/.pihu/installed.json. Explicit config entries retain precedence.
+        for record in self.get_installer().package_store.list("mcp"):
+            if record.get("enabled", True) and record.get("command"):
+                servers_config.setdefault(record.get("id", ""), record)
+        servers_config.pop("", None)
         self.tools.clear()
         self.tool_map.clear()
 
@@ -270,8 +281,6 @@ class MCPManager:
             )
             raise RuntimeError(error_msg) from e
 
-        self.installer = None
-
     def get_installer(self):
         if self.installer is None:
             from pihu.mcp.installer import MCPInstaller
@@ -308,8 +317,7 @@ class MCPManager:
     async def list_installed(self) -> List[Dict[str, Any]]:
         """List all locally installed MCP packages."""
         installer = self.get_installer()
-        manifest_data = installer._read_installed_manifest()
-        return list(manifest_data.get("servers", {}).values())
+        return installer.package_store.list("mcp")
 
     async def doctor(self) -> Dict[str, Any]:
         """Run system diagnostics for MCP runtimes (Python, uv, Node, npm)."""
@@ -336,4 +344,3 @@ class MCPManager:
         self.sessions.clear()
         self.tools.clear()
         self.tool_map.clear()
-

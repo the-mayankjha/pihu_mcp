@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"pihu/cli/internal/ui"
+	"pihu/cli/internal/version"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -24,7 +25,7 @@ var rootCmd = &cobra.Command{
 	Short: "PIHU — Personalized Intelligent Human Utility AI Agent & MCP Operating Environment",
 	Long: ui.RenderAsciiArt() + "\n\n" +
 		"PIHU is an autonomous desktop and coding agent runtime powered by the Model Context Protocol (MCP).\n" +
-		"Supports dual LLMs (Google Gemini & local Ollama), 5 builtin MCP servers, and 53 tools.",
+		"Supports Google Gemini, local Ollama, and dynamically managed MCP servers. Version " + version.Version + ".",
 	Args: cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		cwd, err := os.Getwd()
@@ -48,7 +49,7 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&providerFlag, "provider", "p", "", "LLM provider: 'gemini' (cloud) or 'ollama' (local)")
-	rootCmd.PersistentFlags().StringVarP(&modelFlag, "model", "m", "", "Model name (e.g. gemini-2.0-flash, qwen3:4b)")
+	rootCmd.PersistentFlags().StringVarP(&modelFlag, "model", "m", "", "Model name (e.g. gemini-3.8-flash, qwen3:4b)")
 	rootCmd.PersistentFlags().BoolVar(&jsonFlag, "json", false, "Emit events as JSON-Lines only (for external IPC/integrations)")
 	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Enable verbose output and tool traces")
 
@@ -60,6 +61,7 @@ func init() {
 	mcpCmd.AddCommand(mcpUpdateCmd)
 	mcpCmd.AddCommand(mcpDoctorCmd)
 	mcpCmd.AddCommand(mcpRefreshCmd)
+	mcpCmd.AddCommand(mcpToolsCmd, mcpCallCmd)
 
 	mcpWhatsappCmd.AddCommand(mcpWhatsappAuthCmd)
 	mcpWhatsappCmd.AddCommand(mcpWhatsappStatusCmd)

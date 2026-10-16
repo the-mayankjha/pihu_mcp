@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3:4b"
     gemini_api_key: Optional[str] = None
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-3.8-flash"
 
     # MCP Settings
     mcp_config_path: Path = Field(default_factory=lambda: Path.cwd() / "mcp" / "config.json")
