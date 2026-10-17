@@ -194,8 +194,8 @@ def send_gmail(recipient, subject, body):
 
 # ── CALENDAR ─────────────────────────────────────────────────────────────────
 
-def list_calendar_events(max_results=5):
-    now_iso = datetime.utcnow().isoformat() + "Z"
+def list_calendar_events(max_results=5, time_min=None):
+    now_iso = time_min or datetime.utcnow().isoformat() + "Z"
     url = f"https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin={urllib.parse.quote(now_iso)}&maxResults={max_results}&singleEvents=true&orderBy=startTime"
     resp = make_google_api_request(url)
     
@@ -225,10 +225,16 @@ def list_calendar_events(max_results=5):
 def create_calendar_event(summary, start_time=None, end_time=None, description=""):
     url = "https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1"
     
-    if not start_time:
-        now = datetime.utcnow() + timedelta(hours=1)
-        start_time = now.isoformat() + "Z"
-        end_time = (now + timedelta(hours=1)).isoformat() + "Z"
+    if not start_time or "T" not in start_time:
+        raise ValueError("Supply a meeting start date and time in RFC3339 format with a timezone offset")
+    start = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+    if start.tzinfo is None:
+        raise ValueError("Meeting time must include a timezone offset")
+    if not end_time:
+        end_time = (start + timedelta(hours=1)).isoformat()
+    end = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+    if end.tzinfo is None or end <= start:
+        raise ValueError("Meeting end must include a timezone and be after its start")
 
     event_body = {
         "summary": summary,
@@ -244,7 +250,7 @@ def create_calendar_event(summary, start_time=None, end_time=None, description="
     }
 
     resp = make_google_api_request(url, method="POST", data=event_body)
-    meet_url = resp.get("hangoutLink") or f"https://meet.google.com/{resp.get('id', 'pihu')}"
+    meet_url = resp.get("hangoutLink") or next((item.get("uri") for item in resp.get("conferenceData", {}).get("entryPoints", []) if item.get("entryPointType") == "video"), "")
 
     return {
         "status": "created",
@@ -259,8 +265,8 @@ def create_calendar_event(summary, start_time=None, end_time=None, description="
 
 # ── TASKS ───────────────────────────────────────────────────────────────────
 
-def list_tasks():
-    url = "https://tasks.googleapis.com/tasks/v1/users/@me/lists/@default/tasks?showCompleted=false"
+def list_tasks(show_completed=False):
+    url = "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks?showCompleted=" + str(show_completed).lower()
     resp = make_google_api_request(url)
     
     items = resp.get("items", [])
@@ -279,7 +285,7 @@ def list_tasks():
     }
 
 def create_task(title, due=None, notes=""):
-    url = "https://tasks.googleapis.com/tasks/v1/users/@me/lists/@default/tasks"
+    url = "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks"
     body = {"title": title, "notes": notes}
     if due:
         body["due"] = due if "T" in due else f"{due}T00:00:00.000Z"

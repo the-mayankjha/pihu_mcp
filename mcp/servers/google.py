@@ -65,16 +65,16 @@ def calendar_list(time_min: Optional[str] = None, max_results: int = 5) -> List[
     """List upcoming real Google Calendar events."""
     if gapi:
         try:
-            res = gapi.list_calendar_events(max_results=max_results)
+            res = gapi.list_calendar_events(max_results=max_results, time_min=time_min)
             return res.get("events", [])
         except Exception as e:
-            return []
-    return []
+            raise RuntimeError(str(e))
+    raise RuntimeError("Google API client unavailable")
 
 @mcp.tool()
 def calendar_create_event(
     summary: str, 
-    start_time: str = "", 
+    start_time: str, 
     end_time: str = "", 
     description: str = "", 
     location: str = ""
@@ -94,11 +94,11 @@ def tasks_list_tasks(show_completed: bool = False) -> List[Dict[str, Any]]:
     """List tasks from real Google Tasks API."""
     if gapi:
         try:
-            res = gapi.list_tasks()
+            res = gapi.list_tasks(show_completed=show_completed)
             return res.get("tasks", [])
         except Exception as e:
-            return []
-    return []
+            raise RuntimeError(str(e))
+    raise RuntimeError("Google API client unavailable")
 
 @mcp.tool()
 def tasks_create_task(title: str, due: Optional[str] = None, notes: str = "") -> Dict[str, Any]:
@@ -130,8 +130,8 @@ def drive_search(query: str = "") -> List[Dict[str, Any]]:
             res = gapi.search_drive(query=query)
             return res.get("files", [])
         except Exception as e:
-            return []
-    return []
+            raise RuntimeError(str(e))
+    raise RuntimeError("Google API client unavailable")
 
 # Additional workspace tools. Resource identifiers are URL-encoded, never used as URLs.
 from urllib.parse import quote, urlencode
