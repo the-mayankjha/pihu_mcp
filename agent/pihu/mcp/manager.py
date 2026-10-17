@@ -172,6 +172,11 @@ class MCPManager:
                 )
             )
 
+        # Official optional services must come from package inventory, not stale
+        # paths left by older bundled builds. Preserve unrelated custom servers.
+        for package_id in ('browser-mcp','github-mcp','google-workspace-mcp','pihu-whatsapp-mcp','spotify-mcp'):
+            servers_config.pop(package_id, None)
+
         # Installed MCP packages are shared with the desktop app and CLI through
         # ~/.pihu/installed.json. Explicit config entries retain precedence.
         for record in self.get_installer().package_store.list("mcp"):

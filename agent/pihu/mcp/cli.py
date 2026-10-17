@@ -26,7 +26,7 @@ def _default_servers() -> dict:
     try:
         payload = json.loads(resolve_mcp_config_path().read_text(encoding="utf-8"))
         servers = payload.get("servers", {})
-        return servers if isinstance(servers, dict) else {}
+        return {key:value for key,value in servers.items() if key not in {'browser-mcp','github-mcp','google-workspace-mcp','pihu-whatsapp-mcp','spotify-mcp'}} if isinstance(servers, dict) else {}
     except (OSError, json.JSONDecodeError):
         return {}
 
@@ -37,7 +37,7 @@ async def _list(as_json: bool) -> int:
     defaults = _default_servers()
     installed_by_id = {item.get("id"): item for item in records if item.get("id")}
     for server_id, server in defaults.items():
-        installed_by_id.setdefault(server_id, {"id": server_id, "name": server_id, "enabled": True, "bundled": True})
+        installed_by_id.setdefault(server_id, {"id": server_id, "name": server_id, "enabled": True, "bundled": server_id in {"pihu-file-mcp", "pihu-system-mcp", "pihu-project-mcp", "pihu-web-search-mcp"}, "status":"configured"})
     items = list(installed_by_id.values())
     if as_json:
         print(json.dumps([public_record(item) for item in items], ensure_ascii=False))
