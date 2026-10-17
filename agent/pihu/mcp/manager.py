@@ -260,6 +260,9 @@ class MCPManager:
 
             output_str = "\n".join(result_texts) if result_texts else "Tool executed successfully with no output."
 
+            if getattr(result, "isError", False):
+                raise RuntimeError(output_str)
+
             await bus.emit(
                 AgentEvent(
                     type=EventType.TOOL_COMPLETED,
