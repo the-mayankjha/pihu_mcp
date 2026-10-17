@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from pihu.config.settings import settings
+from pihu.mcp.locking import inventory_lock
 
 
 class PackageStore:
@@ -22,7 +23,7 @@ class PackageStore:
 
     def read(self) -> Dict[str, Any]:
         state: Dict[str, Any] = {"schema_version": 1, "packages": {}, "servers": {}}
-        for path in (self.state_path, self.legacy_state_path):
+        for path in ((self.state_path,) if self.state_path.exists() else (self.legacy_state_path,)):
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
                 if not isinstance(payload, dict):
@@ -65,7 +66,7 @@ class PackageStore:
             except FileNotFoundError:
                 pass
 
-    def record(self, record: Dict[str, Any], package_type: str) -> None:
+    def _record(self, record: Dict[str, Any], package_type: str) -> None:
         if package_type not in ("mcp", "spirits"):
             raise ValueError(f"Unsupported PIHU package type: {package_type}")
         state = self.read()
@@ -76,7 +77,7 @@ class PackageStore:
             state["servers"][package_id] = normalized
         self.write(state)
 
-    def remove(self, package_id: str) -> Optional[Dict[str, Any]]:
+    def _remove(self, package_id: str) -> Optional[Dict[str, Any]]:
         state = self.read()
         record = state["packages"].pop(package_id, None) or state["servers"].pop(package_id, None)
         state["servers"].pop(package_id, None)
@@ -86,3 +87,17 @@ class PackageStore:
     def list(self, package_type: Optional[str] = None) -> List[Dict[str, Any]]:
         records = self.read()["packages"].values()
         return [record for record in records if package_type is None or record.get("type", "mcp") == package_type]
+
+    def record(self, record: Dict[str, Any], package_type: str) -> None:
+        with inventory_lock(self.data_dir): self._record(record, package_type)
+
+    def remove(self, package_id: str) -> Optional[Dict[str, Any]]:
+        with inventory_lock(self.data_dir): return self._remove(package_id)
+
+    def update(self, package_id: str, changes: Dict[str, Any]) -> Dict[str, Any]:
+        with inventory_lock(self.data_dir):
+            records = {record['id']: record for record in self.list('mcp')}
+            if package_id not in records: raise ValueError('MCP is not installed')
+            record = {**records[package_id], **changes}
+            self._record(record, 'mcp')
+            return record

@@ -140,7 +140,9 @@
       "connection": "available",
       "status": "active",
       "verified": false,
-      "name": "pihu-file-mcp"
+      "name": "pihu-file-mcp",
+      "distribution": "bundled",
+      "bundled": true
     },
     {
       "id": "pihu-system-mcp",
@@ -211,7 +213,9 @@
       "connection": "available",
       "status": "active",
       "verified": false,
-      "name": "pihu-system-mcp"
+      "name": "pihu-system-mcp",
+      "distribution": "bundled",
+      "bundled": true
     },
     {
       "id": "pihu-web-search-mcp",
@@ -278,7 +282,9 @@
       "connection": "available",
       "status": "active",
       "verified": false,
-      "name": "pihu-web-search-mcp"
+      "name": "pihu-web-search-mcp",
+      "distribution": "bundled",
+      "bundled": true
     },
     {
       "id": "pihu-project-mcp",
@@ -345,7 +351,9 @@
       "connection": "available",
       "status": "active",
       "verified": false,
-      "name": "pihu-project-mcp"
+      "name": "pihu-project-mcp",
+      "distribution": "bundled",
+      "bundled": true
     },
     {
       "id": "google-workspace-mcp",
@@ -369,8 +377,8 @@
       },
       "repository": {
         "type": "git",
-        "url": "https://github.com/the-mayankjha/pihu_mcp",
-        "branch": "pihu_market"
+        "url": "https://github.com/the-mayankjha/google-workspace-mcp",
+        "branch": "main"
       },
       "transport": {
         "type": "stdio"
@@ -422,14 +430,16 @@
         "Python 3.10 or newer"
       ],
       "installation": {
-        "type": "git",
-        "repository": "https://github.com/the-mayankjha/pihu_mcp",
-        "entrypoint": "mcp/servers/google.py"
+        "type": "archive",
+        "repository": "https://github.com/the-mayankjha/google-workspace-mcp",
+        "entrypoint": "server.py"
       },
       "connection": "available",
       "status": "active",
       "verified": false,
-      "name": "google-workspace-mcp"
+      "name": "google-workspace-mcp",
+      "distribution": "downloadable",
+      "bundled": false
     },
     {
       "id": "pihu-whatsapp-mcp",
@@ -452,8 +462,8 @@
       },
       "repository": {
         "type": "git",
-        "url": "https://github.com/the-mayankjha/pihu_mcp",
-        "branch": "pihu_market"
+        "url": "https://github.com/the-mayankjha/pihu-whatsapp-mcp",
+        "branch": "main"
       },
       "transport": {
         "type": "stdio"
@@ -493,14 +503,16 @@
         "Python 3.10 or newer"
       ],
       "installation": {
-        "type": "git",
-        "repository": "https://github.com/the-mayankjha/pihu_mcp",
-        "entrypoint": "mcp/servers/pihu_whatsapp_mcp.py"
+        "type": "archive",
+        "repository": "https://github.com/the-mayankjha/pihu-whatsapp-mcp",
+        "entrypoint": "server.py"
       },
       "connection": "available",
       "status": "active",
       "verified": false,
-      "name": "pihu-whatsapp-mcp"
+      "name": "pihu-whatsapp-mcp",
+      "distribution": "downloadable",
+      "bundled": false
     },
     {
       "id": "github-mcp",
@@ -523,8 +535,8 @@
       },
       "repository": {
         "type": "git",
-        "url": "https://github.com/the-mayankjha/pihu_mcp",
-        "branch": "pihu_market"
+        "url": "https://github.com/the-mayankjha/github-mcp",
+        "branch": "main"
       },
       "transport": {
         "type": "stdio"
@@ -564,14 +576,16 @@
         "Python 3.10 or newer"
       ],
       "installation": {
-        "type": "git",
-        "repository": "https://github.com/the-mayankjha/pihu_mcp",
-        "entrypoint": "mcp/servers/pihu_github_mcp.py"
+        "type": "archive",
+        "repository": "https://github.com/the-mayankjha/github-mcp",
+        "entrypoint": "server.py"
       },
       "connection": "available",
       "status": "active",
       "verified": false,
-      "name": "github-mcp"
+      "name": "github-mcp",
+      "distribution": "downloadable",
+      "bundled": false
     },
     {
       "id": "spotify-mcp",
@@ -594,8 +608,8 @@
       },
       "repository": {
         "type": "git",
-        "url": "https://github.com/the-mayankjha/pihu_mcp",
-        "branch": "pihu_market"
+        "url": "https://github.com/the-mayankjha/spotify-mcp",
+        "branch": "main"
       },
       "transport": {
         "type": "stdio"
@@ -627,14 +641,16 @@
         "Python 3.10 or newer"
       ],
       "installation": {
-        "type": "git",
-        "repository": "https://github.com/the-mayankjha/pihu_mcp",
-        "entrypoint": "mcp/servers/pihu_spotify_mcp.py"
+        "type": "archive",
+        "repository": "https://github.com/the-mayankjha/spotify-mcp",
+        "entrypoint": "build/index.js"
       },
       "connection": "available",
       "status": "active",
       "verified": false,
-      "name": "spotify-mcp"
+      "name": "spotify-mcp",
+      "distribution": "downloadable",
+      "bundled": false
     },
     {
       "id": "browser-mcp",
@@ -649,7 +665,8 @@
       },
       "repository": {
         "type": "git",
-        "url": "https://github.com/microsoft/playwright-mcp"
+        "url": "https://github.com/the-mayankjha/browser-mcp",
+        "branch": "main"
       },
       "runtime": {
         "type": "node"
@@ -724,14 +741,9 @@
       ],
       "tool_count": 15,
       "installation": {
-        "type": "npm",
-        "package": "@playwright/mcp@0.0.83",
-        "entrypoint": "node_modules/@playwright/mcp/cli.js",
-        "command": "node",
-        "args": [
-          "--browser",
-          "chromium"
-        ]
+        "type": "archive",
+        "repository": "https://github.com/the-mayankjha/browser-mcp",
+        "entrypoint": "node_modules/@playwright/mcp/cli.js"
       },
       "connection": "available",
       "status": "active",
@@ -742,7 +754,9 @@
           "--browser",
           "chromium"
         ]
-      }
+      },
+      "distribution": "downloadable",
+      "bundled": false
     }
   ]
 }

@@ -3,6 +3,7 @@ Manifest data models and validation for PIHU MCP Registry packages.
 """
 
 import json
+import re
 from dataclasses import dataclass, field, asdict
 from typing import Dict, Any, List, Optional
 from enum import Enum
@@ -132,8 +133,6 @@ class MCPPackageManifest:
         tools_data = data.get("tools_provided", data.get("tools", []))
         tools = [item.get("name", "") if isinstance(item, dict) else str(item) for item in tools_data]
         artifacts = data.get("artifacts", [])
-        if not inst.checksum_sha256 and artifacts and isinstance(artifacts[0], dict):
-            inst.checksum_sha256 = artifacts[0].get("sha256")
 
         return cls(
             schema_version=data.get("schema_version", 1),
@@ -164,10 +163,10 @@ class MCPPackageManifest:
 
     def validate(self) -> List[str]:
         errors = []
-        if not self.id:
-            errors.append("Manifest 'id' is required.")
-        if not self.version:
-            errors.append("Manifest 'version' is required.")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,63}", self.id):
+            errors.append("Manifest id must be a safe package slug.")
+        if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?", self.version):
+            errors.append("Manifest version must be an exact semantic version.")
         if self.runtime not in MCPRuntimeType.__members__.values():
             errors.append(f"Invalid runtime '{self.runtime}'.")
         if self.runtime != MCPRuntimeType.REMOTE and not self.entrypoint.command:

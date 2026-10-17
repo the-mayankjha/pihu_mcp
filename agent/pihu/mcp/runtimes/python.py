@@ -1,54 +1,25 @@
-"""Install Python MCP packages into an isolated environment."""
-
-import asyncio
+"""Install Python MCP dependencies in their final, isolated environment."""
+import os
 import sys
 from pathlib import Path
-from typing import Dict, Any
+from pihu.mcp.runtimes.process import run
 
-from pihu.mcp.manifest import MCPPackageManifest
-from pihu.mcp.runtimes.base import BaseMCPRuntimeHandler
-from pihu.mcp.runtimes.source import clone_source, resolve_entrypoint
-
-
-class PythonMCPRuntimeHandler(BaseMCPRuntimeHandler):
-    async def _run(self, *args: str, cwd: Path | None = None) -> None:
-        proc = await asyncio.create_subprocess_exec(
-            *args, cwd=str(cwd) if cwd else None,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            detail = stderr.decode(errors="replace").strip() or stdout.decode(errors="replace").strip()
-            raise RuntimeError(detail or f"Command failed: {args[0]}")
-
-    async def install(self, manifest: MCPPackageManifest, target_dir: Path) -> Dict[str, Any]:
-        venv_dir = target_dir / ".venv"
-        py_binary = venv_dir / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-        await self._run(sys.executable, "-m", "venv", str(venv_dir))
-
-        source_dir: Path | None = None
-        entrypoint: Path | None = None
-        if manifest.installation.method == "git" or manifest.installation.entrypoint:
-            source_dir = await clone_source(manifest, target_dir)
-            entrypoint = resolve_entrypoint(source_dir, manifest)
-
+class PythonMCPRuntimeHandler:
+    async def install(self, manifest, target_dir):
+        environment = target_dir / '.venv'
+        await run(sys.executable, '-m', 'venv', str(environment))
+        python = environment / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
         dependencies = list(manifest.installation.dependencies)
-        if manifest.installation.package:
-            dependencies.append(manifest.installation.package)
-        elif entrypoint:
-            package_dir = entrypoint.parent
-            if (package_dir / "pyproject.toml").is_file() or (package_dir / "setup.py").is_file():
-                dependencies.append(str(package_dir))
-            elif not dependencies:
-                dependencies.append("mcp>=1.3.0,<2.0.0")
-
-        if dependencies:
-            await self._run(str(py_binary), "-m", "pip", "install", *dependencies)
-
-        if entrypoint:
-            command = str(py_binary)
-            args = [str(entrypoint)]
-        else:
-            command = manifest.entrypoint.command or str(py_binary)
-            args = list(manifest.entrypoint.args)
-        return {"command": command, "args": args, "env": manifest.entrypoint.env or {}}
+        requirements = target_dir / 'requirements.txt'
+        locked = target_dir / 'requirements.lock'
+        wheelhouse = target_dir / 'wheelhouse'
+        if locked.is_file() and wheelhouse.is_dir():
+            await run(str(python), '-m', 'pip', 'install', '--no-index', '--find-links', str(wheelhouse), '--require-hashes', '-r', str(locked), cwd=target_dir)
+        elif requirements.is_file():
+            raise ValueError('Python release must include a wheelhouse and hashed requirements.lock')
+        if dependencies: raise ValueError('Dependencies must be bundled in wheelhouse and requirements.lock, not fetched during installation')
+        relative = manifest.installation.entrypoint
+        if not relative: raise ValueError('Python package must declare its entrypoint')
+        entrypoint = (target_dir / relative).resolve()
+        if not entrypoint.is_relative_to(target_dir.resolve()) or not entrypoint.is_file(): raise ValueError('Package entrypoint is missing or unsafe')
+        return {'command':str(python),'args':[str(entrypoint), *manifest.entrypoint.args], 'env':manifest.entrypoint.env}

@@ -11,14 +11,14 @@ from pihu.mcp.manager import MCPManager, resolve_mcp_config_path
 
 
 async def _install(package_spec: str) -> int:
-    success, message, _ = await MCPInstaller().install(package_spec, callback=lambda line: print(f"• {line}", flush=True))
-    print(message, flush=True)
+    success, message, _ = await MCPInstaller().install(package_spec, callback=lambda line: print("PIHU_MARKET_PROGRESS:" + json.dumps({"packageId": package_spec.split("@")[0], "message": line}), flush=True))
+    print(message, file=sys.stdout if success else sys.stderr, flush=True)
     return 0 if success else 1
 
 
 async def _remove(package_id: str) -> int:
     success, message = await MCPInstaller().uninstall(package_id)
-    print(message, flush=True)
+    print(message, file=sys.stdout if success else sys.stderr, flush=True)
     return 0 if success else 1
 
 
@@ -40,7 +40,7 @@ async def _list(as_json: bool) -> int:
         installed_by_id.setdefault(server_id, {"id": server_id, "name": server_id, "enabled": True, "bundled": True})
     items = list(installed_by_id.values())
     if as_json:
-        print(json.dumps(items, ensure_ascii=False))
+        print(json.dumps([public_record(item) for item in items], ensure_ascii=False))
     elif not items:
         print("No MCP packages are installed.")
     else:
@@ -102,9 +102,49 @@ async def _call(server_id: str, tool_name: str, arguments: str) -> int:
         await manager.close_all()
 
 
+def public_record(record):
+    fields = ('id','name','display_name','description','version','runtime','transport','enabled','bundled','status','tools','missing_configuration','last_error','last_checked_at','installed_at')
+    result = {key:record[key] for key in fields if key in record}
+    result['required_configuration'] = record.get('manifest', {}).get('permissions', {}).get('env_vars_required', [])
+    result['previous_version'] = (record.get('previous') or {}).get('version')
+    return result
+
+async def manage(action, package_id, configuration='{}'):
+    installer = MCPInstaller()
+    if action == 'diagnose': result = await installer.diagnose(package_id)
+    elif action == 'rollback': result = installer.rollback(package_id)
+    elif action == 'enable': result = installer.configure(package_id, enabled=True)
+    elif action == 'disable': result = installer.configure(package_id, enabled=False)
+    else:
+        changes = json.loads(configuration)
+        if not isinstance(changes, dict): raise ValueError('Configuration must be an object')
+        records = {record['id']:record for record in installer.package_store.list('mcp')}
+        result = installer.configure(package_id, env={**records[package_id].get('env',{}), **changes}, enabled=True)
+    print(json.dumps(public_record(result)))
+    return 0
+
+def locate_asset(package_id, asset):
+    import re
+    if not re.fullmatch(r'[a-z0-9][a-z0-9-]{1,63}', package_id): raise ValueError('Invalid package ID')
+    installer = MCPInstaller()
+    record = next((item for item in installer.package_store.list('mcp') if item.get('id') == package_id), None)
+    if not record: raise ValueError(f'Install {package_id} from the MCP Market first')
+    if not record.get('enabled', True): raise ValueError(f'Enable {package_id} in the MCP Market first')
+    root = Path(record['install_path']).resolve()
+    expected = (installer.servers_dir / package_id / 'versions').resolve()
+    if not root.is_relative_to(expected): raise ValueError('Invalid installed package location; reinstall this MCP')
+    file = (root / asset).resolve()
+    if not file.is_relative_to(root) or not file.is_file(): raise ValueError(f'{package_id} is missing {asset}; repair it in the MCP Market')
+    print(json.dumps({'path':str(file),'version':record.get('version')}))
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="pihu mcp")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    locate_parser = subparsers.add_parser("locate")
+    locate_parser.add_argument("package_id")
+    locate_parser.add_argument("asset")
     install_parser = subparsers.add_parser("install")
     install_parser.add_argument("package_spec")
     remove_parser = subparsers.add_parser("remove")
@@ -117,8 +157,14 @@ def main() -> None:
     call_parser.add_argument("server_id")
     call_parser.add_argument("tool_name")
     call_parser.add_argument("arguments", nargs="?", default="{}")
+    for action in ('diagnose','rollback','enable','disable','configure'):
+        operation = subparsers.add_parser(action)
+        operation.add_argument('package_id')
+        if action == 'configure': operation.add_argument('configuration')
     args = parser.parse_args()
-    if args.command == "install":
+    if args.command == "locate":
+        code = locate_asset(args.package_id, args.asset)
+    elif args.command == "install":
         code = asyncio.run(_install(args.package_spec))
     elif args.command == "remove":
         code = asyncio.run(_remove(args.package_id))
@@ -126,6 +172,8 @@ def main() -> None:
         code = asyncio.run(_list(args.json))
     elif args.command == "tools":
         code = asyncio.run(_tools(args.json))
+    elif args.command in ('diagnose','rollback','enable','disable','configure'):
+        code = asyncio.run(manage(args.command, args.package_id, getattr(args, 'configuration', '{}')))
     else:
         code = asyncio.run(_call(args.server_id, args.tool_name, args.arguments))
     raise SystemExit(code)

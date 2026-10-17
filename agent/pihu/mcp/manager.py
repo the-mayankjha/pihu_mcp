@@ -67,7 +67,7 @@ class MCPServerSession:
     async def connect(self, timeout: float = 6.0) -> List[ToolDefinition]:
         command = self.config.get("command", "")
         args = self.config.get("args", [])
-        env = self.config.get("env", os.environ.copy())
+        env = {**os.environ, **self.config.get("env", {})}
 
         servers_dir = str(resolve_mcp_servers_dir())
         project_root = str(settings.project_root)
@@ -98,7 +98,7 @@ class MCPServerSession:
         self._exit_stack = AsyncExitStack()
 
         async def _do_connect():
-            devnull = open(os.devnull, "w")
+            devnull = self._exit_stack.enter_context(open(os.devnull, "w"))
             read_stream, write_stream = await self._exit_stack.enter_async_context(
                 stdio_client(server_params, errlog=devnull)
             )
@@ -175,8 +175,12 @@ class MCPManager:
         # Installed MCP packages are shared with the desktop app and CLI through
         # ~/.pihu/installed.json. Explicit config entries retain precedence.
         for record in self.get_installer().package_store.list("mcp"):
+            package_id = record.get("id", "")
+            from pihu.mcp.installer import CORE_PACKAGES
+            if package_id in CORE_PACKAGES: continue
+            servers_config.pop(package_id, None)
             if record.get("enabled", True) and record.get("command"):
-                servers_config.setdefault(record.get("id", ""), record)
+                servers_config[package_id] = record
         servers_config.pop("", None)
         self.tools.clear()
         self.tool_map.clear()

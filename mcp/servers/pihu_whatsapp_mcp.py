@@ -21,7 +21,18 @@ except ImportError:
 
 mcp = FastMCP("PIHUWhatsAppMCP")
 
-WHATSAPP_API_BASE_URL = os.getenv("PIHU_WHATSAPP_API_URL", "http://localhost:8080/api")
+def whatsapp_api_url():
+    override = os.getenv("PIHU_WHATSAPP_API_URL")
+    if override: return override
+    descriptor = os.path.expanduser("~/.pihu/mcp-services/pihu-whatsapp-mcp.json")
+    try:
+        with open(descriptor, encoding="utf-8") as source: endpoint = json.load(source)
+        port = endpoint.get("port")
+        if endpoint.get("id") == "pihu-whatsapp-mcp" and isinstance(port, int) and 0 < port <= 65535:
+            return f"http://127.0.0.1:{port}/api"
+    except (OSError, ValueError): pass
+    return "http://127.0.0.1:8080/api"
+
 
 
 def resolve_messages_db_path() -> Optional[str]:
@@ -86,7 +97,7 @@ def resolve_recipient(recipient: str) -> str:
     
     # Check live WhatsApp Bridge chats and groups
     try:
-        req = urllib.request.Request(f"{WHATSAPP_API_BASE_URL}/chats", headers={"User-Agent": "PIHU-MCP"})
+        req = urllib.request.Request(f"{whatsapp_api_url()}/chats", headers={"User-Agent": "PIHU-MCP"})
         with urllib.request.urlopen(req, timeout=1.5) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             for chat in data.get("chats", []):
@@ -115,7 +126,7 @@ def resolve_recipient(recipient: str) -> str:
 
 def api_request(endpoint: str, payload: Optional[Dict[str, Any]] = None, timeout: float = 8.0) -> Dict[str, Any]:
     """Execute HTTP request to the WhatsApp bridge REST API."""
-    url = f"{WHATSAPP_API_BASE_URL}/{endpoint.lstrip('/')}"
+    url = f"{whatsapp_api_url()}/{endpoint.lstrip('/')}"
     try:
         if payload is not None:
             data = json.dumps(payload).encode("utf-8")
