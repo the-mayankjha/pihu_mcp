@@ -79,6 +79,7 @@ class MCPPackageManifest:
     requirements: MCPRequirements = field(default_factory=MCPRequirements)
     permissions: MCPPermissions = field(default_factory=MCPPermissions)
     endpoint: Optional[str] = None
+    auth_required: bool = False
     tools_provided: List[str] = field(default_factory=list)
     tool_definitions: List[Dict[str, Any]] = field(default_factory=list)
     display_name: Optional[str] = None
@@ -117,16 +118,16 @@ class MCPPackageManifest:
             runtime_val = runtime_val.get("type", "python")
         try:
             runtime_enum = MCPRuntimeType(runtime_val)
-        except ValueError:
-            runtime_enum = MCPRuntimeType.PYTHON
+        except ValueError as error:
+            raise ValueError(f"Unsupported MCP runtime: {runtime_val}") from error
 
         transport_val = data.get("transport", "stdio")
         if isinstance(transport_val, dict):
             transport_val = transport_val.get("type", "stdio")
         try:
             transport_enum = MCPTransportType(transport_val)
-        except ValueError:
-            transport_enum = MCPTransportType.STDIO
+        except ValueError as error:
+            raise ValueError(f"Unsupported MCP transport: {transport_val}") from error
 
         author_data = data.get("author", "")
         author = author_data.get("name", "") if isinstance(author_data, dict) else author_data
@@ -151,6 +152,7 @@ class MCPPackageManifest:
             requirements=req,
             permissions=perm,
             endpoint=data.get("endpoint"),
+            auth_required=bool(data.get("auth_required", False)),
             tools_provided=[tool for tool in tools if tool],
             tool_definitions=[tool for tool in tools_data if isinstance(tool, dict) and isinstance(tool.get("name"), str)],
             display_name=data.get("display_name"),
