@@ -105,6 +105,8 @@ async def _call(server_id: str, tool_name: str, arguments: str) -> int:
 def public_record(record):
     fields = ('id','name','display_name','description','version','runtime','transport','enabled','bundled','status','tools','missing_configuration','last_error','last_checked_at','installed_at')
     result = {key:record[key] for key in fields if key in record}
+    from pihu.mcp.account_state import account_state
+    result['account_state'] = account_state(record)
     result['required_configuration'] = record.get('manifest', {}).get('permissions', {}).get('env_vars_required', [])
     result['previous_version'] = (record.get('previous') or {}).get('version')
     return result

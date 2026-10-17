@@ -756,7 +756,8 @@
         ]
       },
       "distribution": "downloadable",
-      "bundled": false
+      "bundled": false,
+      "tags": []
     }
   ]
 }
