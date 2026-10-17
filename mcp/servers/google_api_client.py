@@ -295,10 +295,19 @@ def create_task(title, due=None, notes=""):
 
 # ── DOCS & DRIVE ─────────────────────────────────────────────────────────────
 
-def create_doc(title):
+def create_doc(title, content=""):
+    if not title.strip():
+        return {"error": "Document title is required"}
     url = "https://docs.googleapis.com/v1/documents"
     resp = make_google_api_request(url, method="POST", data={"title": title})
     doc_id = resp.get("documentId")
+    if not doc_id:
+        return {"error": "Google did not return a document ID"}
+    if content:
+        try:
+            make_google_api_request(f"https://docs.googleapis.com/v1/documents/{doc_id}:batchUpdate", method="POST", data={"requests": [{"insertText": {"location": {"index": 1}, "text": content}}]})
+        except Exception as error:
+            return {"error": str(error), "partial_document_id": doc_id, "doc_url": f"https://docs.google.com/document/d/{doc_id}/edit", "message": "Document created but content insertion failed. Do not create another document blindly."}
     doc_url = f"https://docs.google.com/document/d/{doc_id}/edit"
     return {
         "status": "created",
